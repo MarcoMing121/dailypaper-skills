@@ -5,6 +5,7 @@ description: |
   保存推荐文件到 Obsidian，更新 history；git 自动化默认关闭。
 
   触发词："论文点评"、"跑一下论文点评"
+metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 ---
 
 > **开始前**: 先说一声 "开始点评论文 🔪" 并告知今天日期。
@@ -82,6 +83,7 @@ description: |
 每篇论文的 `source`（hf-daily / hf-trending / arxiv）和 `hf_upvotes` 来自抓取数据，必须保留到输出中。`method_summary` 来自富化数据，用于撰写核心方法描述。
 
 **来源格式规则**（按 source 字段分别显示）：
+
 - `hf-daily` → `📰 HF Daily，⬆️ {hf_upvotes}`
 - `hf-trending` → 🔥 HF Trending，⬆️ {hf_upvotes}`
 - `arxiv` → `📄 arXiv 关键词检索`（不显示 upvotes，因为没有）
@@ -95,12 +97,14 @@ description: |
 你可以基于所有可用信息做判断：论文富化数据（方法名列表、章节标题、表格标题、真实实验检测）、摘要全文。
 
 **绝对禁止：**
+
 - 声称论文"只在 simulation 里做了实验"——除非确实没有 real-world 相关内容。如果 `has_real_world` 为 true，必须承认有真实实验
 - 声称论文是某篇已有工作的"翻版/换皮"——除非能从摘要中指出方法层面的具体相同点
 - 编造论文中不存在的缺陷（如"没有 ablation study"、"没有 baseline 对比"）
 - 对不确定的事实用肯定语气。不确定就说"摘要未提及"或"需要看全文确认"
 
 **你可以（且应该）做的：**
+
 - 基于方法名列表，指出论文具体借鉴/对比了哪些前人工作
 - 基于摘要指出方法假设是否过强、适用范围是否狭窄
 - 基于章节标题和表格标题推断实验设计的覆盖面
@@ -132,6 +136,7 @@ description: |
 ##### 1. 开头：今日锐评 + 分流表
 
 用 `# 🔪 今日锐评` 作为标题。2-3 句话，简短直接：
+
 - 今天论文整体水平如何
 - 哪个方向在爆发、哪些是灌水重灾区
 - 如果和笔记库里已有的工作撞车了，直接点名
@@ -141,14 +146,15 @@ description: |
 ```markdown
 ## 分流表
 
-| 等级 | 论文 |
-|------|------|
-| 🔥 必读 | [[CoWVLA]]（VLA + world model）· [[NE-Dreamer]]（decoder-free WM） |
-| 👀 值得看 | [[Utonia]]（统一点云 encoder）· [[RoboLight]]（光照数据集） |
-| 💤 可跳过 | [[DEVS]]（离 robotics 太远）· [[XXX]]（方法无新意） |
+| 等级      | 论文                                                               |
+| --------- | ------------------------------------------------------------------ |
+| 🔥 必读   | [[CoWVLA]]（VLA + world model）· [[NE-Dreamer]]（decoder-free WM） |
+| 👀 值得看 | [[Utonia]]（统一点云 encoder）· [[RoboLight]]（光照数据集）        |
+| 💤 可跳过 | [[DEVS]]（离 robotics 太远）· [[XXX]]（方法无新意）                |
 ```
 
 分流表规则：
+
 - 论文名用 `[[wikilink]]`，Obsidian 中可直接跳转到笔记
 - 每篇论文后括号内一句话说明理由
 - 同等级论文用 `·` 分隔，写在同一行
@@ -161,6 +167,7 @@ description: |
 
 ```markdown
 ### N. 论文标题
+
 - **链接**: [arXiv](https://arxiv.org/abs/XXXX) | [PDF](https://arxiv.org/pdf/XXXX)
 - **来源**: {见下方来源格式}
 
@@ -174,6 +181,7 @@ description: |
 
 ```markdown
 ### N. 论文标题
+
 - **作者**: 完整作者列表（优先使用富化的 authors 字段，其次用原始 authors 字段）
 - **机构**: 从富化的 affiliations 字段获取，列出所有机构。如果 affiliations 为空，再检查原始 affiliations 字段。都没有则写"未知"
 - **链接**: [arXiv](https://arxiv.org/abs/XXXX) | [PDF](https://arxiv.org/pdf/XXXX)
@@ -182,7 +190,7 @@ description: |
 > ⏪ **再推提醒**：这篇在 {last_recommend_date} 推荐过
 > ← 仅对 is_re_recommend=true 的论文显示
 
-![](首图URL)    ← 只在有 figure_url 时添加，绝对不要编造图片 URL
+![](首图URL) ← 只在有 figure_url 时添加，绝对不要编造图片 URL
 
 - **核心方法**: 3-5 句话讲清楚方法怎么工作（基于 method_summary 富化数据，不要复述摘要）。必须包含：
   1. 输入/输出是什么
@@ -192,7 +200,7 @@ description: |
 - **借鉴意义**: 对做 embodied AI / world model / diffusion policy 的人有什么用。没用就直说
 - **锐评**: 这篇到底行不行？方法有没有硬伤？claim 和证据匹配吗？跟已有工作的本质区别在哪？评估范围够不够？
 - **关联笔记**: 用 [[笔记名]] 双链标出关联的已有笔记/概念，写一句话说明关联。没有就不写
-- 💡 **想精读？** 运行：`读一下 论文标题`    ← 仅对"值得看"等级的论文显示，"必读"会自动生成笔记，"可跳过"不需要
+- 💡 **想精读？** 运行：`读一下 论文标题` ← 仅对"值得看"等级的论文显示，"必读"会自动生成笔记，"可跳过"不需要
 ```
 
 ##### 3. 收尾
@@ -238,8 +246,8 @@ tags: [daily-papers, auto-generated]
 
 仅当 `GIT_COMMIT_ENABLED=true` 时执行，并且必须按下面顺序检查：
 
-   1. `VAULT_PATH/.git` 存在
-   2. `git add "{daily_papers_folder}/YYYY-MM-DD-论文推荐.md" "{daily_papers_folder}/.history.json"` 之后确实有 staged changes
+1.  `VAULT_PATH/.git` 存在
+2.  `git add "{daily_papers_folder}/YYYY-MM-DD-论文推荐.md" "{daily_papers_folder}/.history.json"` 之后确实有 staged changes
 
 只有在上述条件都满足时才 commit：
 
@@ -252,6 +260,7 @@ cd {VAULT_PATH} && git add "{daily_papers_folder}/YYYY-MM-DD-论文推荐.md" "{
 ## 输出
 
 完成后告知用户：
+
 - 推荐了多少篇论文
 - 必读/值得看/可跳过各多少篇
 - 提示运行下一步：`跑一下论文笔记`

@@ -9,8 +9,10 @@ description: |
   "批判性分析这篇论文 ...", "读一下 Zotero 里的 XXX", "批量读一下 Zotero 里 VLA 分类下的论文"
 
   **重要触发词**: "读一下 XXX"、"读一下这篇"、"帮我读" → 必须调用此 skill
-context: fork
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch
+metadata:
+  {
+    "openclaw": { "requires": { "bins": ["python3", "pdftotext"], "env": [] } },
+  }
 ---
 
 > **开始前**: 先跟用户打个招呼 🐕
@@ -44,13 +46,13 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch
 
 ## 1. 接收论文
 
-| 输入方式 | 示例 | 处理方法 |
-|----------|------|----------|
-| PDF 路径 | `/path/to/paper.pdf` | 直接 Read |
-| arXiv 链接 | `https://arxiv.org/abs/xxxx` | WebFetch |
-| Zotero 分类 | "VLA 分类的论文" | 查询数据库 → 列出 → 用户选择 |
-| Zotero 搜索 | "Zotero 里的 π0.5" | 搜索标题 → 找到 PDF |
-| 无 PDF | Zotero 条目无附件 | 从网上获取（见下方） |
+| 输入方式    | 示例                         | 处理方法                     |
+| ----------- | ---------------------------- | ---------------------------- |
+| PDF 路径    | `/path/to/paper.pdf`         | 直接 Read                    |
+| arXiv 链接  | `https://arxiv.org/abs/xxxx` | WebFetch                     |
+| Zotero 分类 | "VLA 分类的论文"             | 查询数据库 → 列出 → 用户选择 |
+| Zotero 搜索 | "Zotero 里的 π0.5"           | 搜索标题 → 找到 PDF          |
+| 无 PDF      | Zotero 条目无附件            | 从网上获取（见下方）         |
 
 ### 无 PDF 时的获取流程
 
@@ -64,12 +66,12 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch
 
 ## 2. 阅读模式
 
-| 模式 | 触发词 | 输出 |
-|------|--------|------|
-| **快速摘要** | "快速看一下"、"quick" | 3-5 句核心贡献 |
-| **完整解析** | "详细分析"、默认 | 结构化笔记（用模板） |
-| **批判分析** | "批判性分析"、"critique" | 方法论优缺点评估 |
-| **知识提取** | "提取公式"、"技术细节" | 公式 + 算法伪代码 |
+| 模式         | 触发词                   | 输出                 |
+| ------------ | ------------------------ | -------------------- |
+| **快速摘要** | "快速看一下"、"quick"    | 3-5 句核心贡献       |
+| **完整解析** | "详细分析"、默认         | 结构化笔记（用模板） |
+| **批判分析** | "批判性分析"、"critique" | 方法论优缺点评估     |
+| **知识提取** | "提取公式"、"技术细节"   | 公式 + 算法伪代码    |
 
 ## 3. 笔记生成
 
@@ -107,9 +109,11 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch
 ### 图片可靠性保障（生成后自动执行）
 
 笔记保存后，运行图片可达性检查脚本，自动将不可访问的外链图片下载到本地：
+
 ```bash
 python3 ../daily-papers/download_note_images.py "{笔记完整路径}"
 ```
+
 - 可达的外链保持不动，不可达的自动下载到 `assets/` 并替换为 Obsidian wikilink
 - 如有本地化操作，frontmatter `image_source` 自动更新为 `mixed`
 
@@ -139,7 +143,7 @@ method_name: "MethodName"
 authors: [Author1, Author2]
 year: 2025
 venue: arXiv
-tags: [tag1, tag2]  # 小写连字符，3-8 个
+tags: [tag1, tag2] # 小写连字符，3-8 个
 zotero_collection: 3-Robotics/1-VLX/VLA
 image_source: online
 created: YYYY-MM-DD
@@ -159,9 +163,11 @@ Tags 判断：看 Related Work 小标题 + Abstract 关键词。第一个 tag �
    - 先确认 `VAULT_PATH/.git` 存在
    - `git add {新增文件} {paper_notes_folder}/` 后必须真的有 staged changes
    - 满足条件后再执行：
+
    ```bash
    cd {VAULT_PATH} && git add {新增文件} {paper_notes_folder}/ && git commit -m "add paper note: {方法名}"
    ```
+
    - 只有在 `GIT_PUSH_ENABLED=true` 且仓库已配置远端时才 push
 
 ## 5. 概念库维护（每篇论文必做）

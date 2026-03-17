@@ -5,6 +5,7 @@ description: |
   链接回填到推荐文件；目录页默认自动刷新，git 自动化默认关闭。
 
   触发词："批量笔记"、"跑一下论文笔记"
+metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 ---
 
 > **开始前**: 先说一声 "开始整理笔记 📝" 并告知今天日期。
@@ -48,12 +49,14 @@ description: |
 ### Step 1: 概念库补充
 
 **1a: 提取概念列表**
+
 1. 扫描今天的推荐文件，提取所有 `[[...]]` 链接
 2. 额外从 `/tmp/daily_papers_enriched.json` 的 `method_names` 列表中提取所有方法名
 3. 合并去重
 
 **1b: 过滤**
 只保留以下类型的术语（跳过通用词、论文自身名称、公司名、人名）：
+
 - 方法/模型名（如 Q-Former, Parseval Regularization, CVAE, PCM）
 - 数据集名（如 AMASS, LaFan1, MotionX, AndroidCode）
 - 仿真器/框架名（如 OmniGibson, IsaacLab, Acados）
@@ -93,6 +96,7 @@ paper-reader 在独立的 Task agent 中运行，不会占用主 agent 的 conte
 #### 🔍 生成后质量验证（每篇必须执行）
 
 每篇笔记生成后，立即验证：
+
 1. 文件行数 >= 120（低于此值说明内容不完整）
 2. 包含 `$$` 或 `$` LaTeX 公式（至少 2 处）
 3. 包含 `![` 图片引用（至少 1 张）
@@ -157,6 +161,7 @@ cd {VAULT_PATH} && git add -A && git commit -m "daily papers: notes YYYY-MM-DD"
 ## 输出
 
 完成后告知用户：
+
 - 创建了多少个新概念
 - 生成了多少篇论文笔记
 - 回填了多少个笔记链接

@@ -5,6 +5,7 @@ description: |
   “最近3天论文”“看看这周有啥论文”时使用。
 
   内部会自动串联论文抓取、推荐生成、重点论文笔记三步，无需用户手动拆开。
+metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 ---
 
 # 每日论文推荐

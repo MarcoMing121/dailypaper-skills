@@ -6,6 +6,7 @@ description: |
 
   触发词："论文抓取"、"跑一下论文抓取"
   支持多天模式："过去3天论文推荐"、"过去一周论文推荐"、"过去一周的论文"、"抓 3 天的论文"、"最近5天"
+metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 ---
 
 > **开始前**: 先说一声 "开始抓取论文 🐕" 并告知今天日期。如果是多天模式，告知抓取范围。
@@ -39,6 +40,7 @@ description: |
 ## 解析天数
 
 从用户输入中解析 `--days N` 参数。匹配规则：
+
 - "过去一周"、"最近7天"、"一周的论文" → `--days 7`
 - "过去3天"、"最近三天"、"抓3天" → `--days 3`
 - "过去两周" → `--days 14`
@@ -69,6 +71,7 @@ python3 ../daily-papers/fetch_and_score.py --days N > /tmp/daily_papers_top30.js
 根据前面解析的 `DAYS_ARG`，如果用户指定了天数就加 `--days N`，否则不加。
 
 脚本自动完成：
+
 - 并行抓取 HuggingFace Daily + Trending API 和 arXiv API
 - 关键词打分（正向/负向/领域加分/trending 加分）
 - 按 arXiv ID 合并去重
@@ -93,6 +96,7 @@ cat /tmp/daily_papers_top30.json | python3 ../daily-papers/enrich_papers.py /tmp
 注意：使用**文件路径参数**（而非 stdout 重定向），避免 sandbox 环境下 stdout/stderr 混淆。
 
 脚本自动完成以下工作（Semaphore(10) 限制并发，单篇超时 30 秒）：
+
 - 并行抓取 HTML 页面 + PDF 页面
 - 从 HTML 提取：figure_url、authors、affiliations、section_headers、captions、has_real_world、method_names、method_summary
 - 从 PDF 提取：affiliations（通过 `pdftotext | extract_affiliations.py`）
@@ -104,6 +108,7 @@ cat /tmp/daily_papers_top30.json | python3 ../daily-papers/enrich_papers.py /tmp
   - 其他字段: HTML regex 提取
 
 **输出格式**：与输入相同的 JSON 数组，每篇论文增加以下字段：
+
 - `figure_url` (string): 首图 URL
 - `affiliations` (string): 机构列表，逗号分隔
 - `authors` (string): 作者列表（可能被更完整的来源覆盖）
@@ -116,6 +121,7 @@ cat /tmp/daily_papers_top30.json | python3 ../daily-papers/enrich_papers.py /tmp
 ## 输出
 
 完成后检查 `/tmp/daily_papers_enriched.json` 存在且包含有效 JSON 数组。告知用户：
+
 - 抓取了多少篇论文
 - 富化成功多少篇
 - 提示运行下一步：`跑一下论文点评`

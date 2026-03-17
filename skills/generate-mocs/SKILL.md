@@ -1,8 +1,12 @@
 ---
+
 name: generate-mocs
 description: |
   重新生成 Obsidian 里的目录页 / 导航页（MOC）。
   当用户说“更新索引”“更新论文和概念目录”“刷新论文和概念目录”“刷新MOC”时使用。
+metadata:{
+"openclaw": { "requires": { "bins": ["python3"], "env": [] } },
+}
 ---
 
 # 更新目录页
