@@ -51,20 +51,53 @@ def extract_arxiv_id(url: str) -> str:
 
 
 async def check_url(url: str, sem: asyncio.Semaphore) -> bool:
-    """Check if a URL is reachable (HTTP 200) using curl."""
+    """Check if a URL is reachable and returns actual image content (not HTML redirect)."""
     async with sem:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-sL", "-o", "/dev/null", "-w", "%{http_code}",
+                "curl", "-sL", "-o", "/dev/null",
+                "-w", "%{http_code}|%{content_type}",
                 "--max-time", str(CURL_TIMEOUT), url,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=CURL_TIMEOUT + 5)
-            code = stdout.decode().strip() if stdout else ""
-            return code == "200"
+            output = stdout.decode().strip() if stdout else ""
+            parts = output.split("|", 1)
+            code = parts[0]
+            content_type = parts[1] if len(parts) > 1 else ""
+            # Must be HTTP 200 AND content-type must be an image (not HTML)
+            if code != "200":
+                return False
+            if content_type and "image" not in content_type.lower():
+                return False
+            return True
         except (asyncio.TimeoutError, Exception):
             return False
+
+
+def is_valid_image(path: Path) -> bool:
+    """Check if a file is a real image by inspecting magic bytes, not just size."""
+    if not path.exists() or path.stat().st_size < 1024:
+        return False
+    try:
+        with open(path, "rb") as f:
+            header = f.read(16)
+        # PNG: \x89PNG
+        if header[:4] == b"\x89PNG":
+            return True
+        # JPEG: \xff\xd8\xff
+        if header[:3] == b"\xff\xd8\xff":
+            return True
+        # GIF: GIF87a or GIF89a
+        if header[:3] == b"GIF":
+            return True
+        # WebP: RIFF....WEBP
+        if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+            return True
+        return False
+    except Exception:
+        return False
 
 
 async def download_image(url: str, dest: Path, sem: asyncio.Semaphore) -> bool:
@@ -78,9 +111,13 @@ async def download_image(url: str, dest: Path, sem: asyncio.Semaphore) -> bool:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.wait_for(proc.communicate(), timeout=CURL_TIMEOUT + 15)
-            # Verify file exists and is non-trivial
-            return dest.exists() and dest.stat().st_size > 1024
+            # Verify file is a real image (not HTML redirect page)
+            if not is_valid_image(dest):
+                dest.unlink(missing_ok=True)
+                return False
+            return True
         except (asyncio.TimeoutError, Exception):
+            dest.unlink(missing_ok=True)
             return False
 
 
