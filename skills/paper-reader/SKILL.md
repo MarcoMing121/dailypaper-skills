@@ -30,19 +30,17 @@ metadata:
 显式生成并在后续统一使用这些变量：
 
 - `VAULT_PATH`
-- `NOTES_PATH`
-- `CONCEPTS_PATH`
+- `NOTES_PATH` = `{VAULT_PATH}/Papers`
+- `CONCEPTS_PATH` = `{VAULT_PATH}/Concepts`
+- `ASSETS_PATH` = `{VAULT_PATH}/assets`
+- `TOPIC_MOC_PATH` = `{VAULT_PATH}/Concepts/MOCs`
 - `ZOTERO_DB`
 - `ZOTERO_STORAGE`
 - `AUTO_REFRESH_INDEXES`
 - `GIT_COMMIT_ENABLED`
 - `GIT_PUSH_ENABLED`
 
-其中：
-
-- `NOTES_PATH = {VAULT_PATH}/{paper_notes_folder}`
-- `CONCEPTS_PATH = {NOTES_PATH}/{concepts_folder}`
-- `GIT_PUSH_ENABLED` 只有在 `GIT_COMMIT_ENABLED=true` 时才可能为真
+其中 `GIT_PUSH_ENABLED` 只有在 `GIT_COMMIT_ENABLED=true` 时才可能为真。
 
 后续统一使用上面的变量。
 
@@ -154,11 +152,22 @@ python3 ../daily-papers/download_note_images.py "{笔记完整路径}"
 
 只用**方法名/模型名**：`{方法名}.md`（如 `Pi05.md`，不加年份前缀）。
 方法名判断：标题冒号前 / Abstract 中 "We propose XXX" / 希腊字母转 ASCII。
-不确定时保存到 `_待整理/`。
+不确定时保存到 `_Inbox/`。
 
 ### 保存路径
 
-按 Zotero 分类层级：`{NOTES_PATH}/{zotero_collection_path}/{方法名}.md`
+按研究兴趣分类：
+
+| 分类 | 路径 | 适用论文 |
+|------|------|----------|
+| **1-Continual-Learning** | `{NOTES_PATH}/1-Continual-Learning/` | 持续学习、灾难性遗忘、终身学习 |
+| **2-VLA** | `{NOTES_PATH}/2-VLA/` | Vision-Language-Action、机器人策略 |
+| **3-World-Model** | `{NOTES_PATH}/3-World-Model/` | 世界模型、JEPA、预测模型 |
+| **4-RL-Theory** | `{NOTES_PATH}/4-RL-Theory/` | 强化学习理论、奖励建模 |
+| **5-Deep-Learning** | `{NOTES_PATH}/5-Deep-Learning/` | 深度学习基础、架构创新 |
+| **_Inbox** | `{NOTES_PATH}/_Inbox/` | 待分类 |
+
+**分类判断**：看论文 tags 的第一个标签 + Abstract 核心问题。
 
 ### YAML frontmatter
 
@@ -204,14 +213,33 @@ Tags 判断：看 Related Work 小标题 + Abstract 关键词。第一个 tag �
 
 1. **扫描**论文笔记中所有 `[[概念]]` 链接
 2. **检查**每个链接对应的概念笔记是否存在（`ls` + `find`）
-3. **创建**不存在的概念（不可跳过），自动归类到对应子目录
+3. **链接**已存在的概念（保留链接）
+4. **记录**待创建的概念列表
+5. **询问**用户是否创建缺失的概念
 
 > 分类规则和模板见 `references/concept-categories.md`
+> 
+> **注意**：不要强制创建空的概念笔记。如果用户选择不创建，保留链接但记录到待创建列表。
+
+### 概念分类目录
+
+概念按学科层级分类到以下目录：
+
+| 目录 | 归类标准 | 示例 |
+|------|----------|------|
+| `1-Foundations/` | 基础概念、理论 | Catastrophic_Forgetting, Stability-Plasticity_Dilemma |
+| `2-Methods/` | 方法、算法 | Adapter, LoRA, MoE, EWC |
+| `3-Architectures/` | 模型架构 | VLA, CLIP, World-Model |
+| `4-RL/` | 强化学习 | RL, Policy-Learning |
+| `5-Robotics/` | 机器人相关 | Skill-Learning, Robot-Robustness |
+| `6-Techniques/` | 具体技术 | Flow-Matching, Diffusion-Policy |
+| `7-Datasets/` | 数据集 | LIBERO, RoboTwin |
 
 ### 自检
 
-- [ ] 笔记中所有 `[[概念]]` 链接的概念笔记都存在？
-- [ ] 概念笔记包含本论文作为"代表工作"？
+- [ ] 笔记中所有 `[[概念]]` 链接已检查？
+- [ ] 已存在的概念笔记已链接？
+- [ ] 待创建的概念已记录？
 
 ## 6. 完成后自检（合并 checklist）
 
