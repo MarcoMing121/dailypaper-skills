@@ -2,7 +2,7 @@
 name: social-paper-finder
 description: |
   从社交平台（小红书、Twitter）发现论文。当用户提供小红书或 Twitter 链接时，
-  提取内容、识别论文信息、收集博主观点和热门评论。
+  提取内容、识别论文信息、收集博主观点。
 
   触发词：
   - 小红书链接：xhslink.com、xiaohongshu.com
@@ -11,13 +11,22 @@ description: |
 
 metadata:
   {
-    "openclaw": { "requires": { "bins": ["agent-browser"], "env": [] } }
+    "openclaw": { "requires": { "bins": [], "env": [] } }
   }
 ---
 
 # Social Paper Finder - 社交平台论文发现
 
 从社交平台提取论文信息，传递给 paper-reader 进行深入阅读。
+
+## 缓存目录
+
+所有下载的图片存放在：
+```
+/root/.openclaw/workspace/.cache/social-images/
+```
+
+定期清理：cron job 每天凌晨 3 点清理超过 7 天的图片。
 
 ## Step 0: 平台识别
 
@@ -28,61 +37,107 @@ metadata:
 | 小红书 | `xhslink.com/*`、`xiaohongshu.com/*` | `extract_xiaohongshu()` |
 | Twitter | `twitter.com/*`、`x.com/*` | `extract_twitter()` |
 
-## Step 1: 使用 agent-browser 访问页面
+## Step 1: 小红书提取 (curl 方案)
 
-### 1.1 打开链接
-
-```bash
-agent-browser open "<url>"
-agent-browser wait 3000  # 等待页面加载
-```
-
-### 1.2 获取页面快照
+### 1.1 下载页面 HTML
 
 ```bash
-agent-browser snapshot -i
+curl -L -s "http://xhslink.com/o/xxx" -o /tmp/xhs.html
 ```
 
-### 1.3 截图（可选，用于调试）
+### 1.2 提取标题
 
 ```bash
-agent-browser screenshot /tmp/social_page.png
+grep -oP '<title>.*?</title>' /tmp/xhs.html | head -1
 ```
 
-## Step 2: 提取内容
+### 1.3 提取正文描述
 
-### 小红书提取流程
+```bash
+grep -oP '<meta name="description" content="[^"]*"' /tmp/xhs.html | head -1
+```
 
-1. **识别页面类型**：
-   - 笔记详情页（有正文内容）
-   - 需要登录的页面（提示用户）
+### 1.4 提取作者信息
 
-2. **提取正文内容**：
-   ```bash
-   # 找到正文区域的文字
-   agent-browser get text @content_selector
-   ```
+```bash
+grep -oP '"nickname":"[^"]*"' /tmp/xhs.html | head -1
+```
 
-3. **提取博主信息**：
-   - 博主昵称
-   - 博主 ID
-   - 发布时间
+### 1.5 提取点赞数
 
-4. **提取评论**（前 10 条）：
-   - 滚动到评论区
-   - 获取热门评论内容和点赞数
+```bash
+grep -oP '"likedCount":"[^"]*"' /tmp/xhs.html | head -1
+```
 
-### Twitter 提取流程
+### 1.6 提取并下载图片
 
-1. **提取推文内容**：
-   - 推文正文
-   - 作者信息
-   - 发布时间
-   - 点赞/转发数
+```bash
+# 提取图片 URL（需要反转义 \u002F → /）
+img_url=$(grep -oP 'urlDefault":"[^"]*' /tmp/xhs.html | head -1 | sed 's/urlDefault":"//g' | sed 's/\\u002F/\//g')
 
-2. **提取回复**（前 10 条）：
-   - 热门回复内容
-   - 回复者信息
+# 下载到缓存目录（以笔记 ID 命名）
+note_id=$(grep -oP '"noteId":"[^"]*"' /tmp/xhs.html | head -1 | sed 's/"noteId":"//g' | sed 's/"//g')
+curl -s "$img_url" -o "/root/.openclaw/workspace/.cache/social-images/${note_id}.jpg"
+```
+
+### 1.7 读取图片内容
+
+使用 `read` 工具读取下载的图片，查看内容：
+```bash
+read /root/.openclaw/workspace/.cache/social-images/${note_id}.jpg
+```
+
+### 小红书可提取内容
+
+| 字段 | 提取方式 | 状态 |
+|------|----------|------|
+| 标题 | `<title>` | ✅ |
+| 正文 | `<meta name="description">` | ✅ |
+| 作者 | `"nickname":"xxx"` | ✅ |
+| 点赞数 | `"likedCount":"xxx"` | ✅ |
+| 笔记 ID | `"noteId":"xxx"` | ✅ |
+| 图片 | `urlDefault` + 反转义 | ✅ |
+| 评论 | JS 动态加载 | ❌ 暂不支持 |
+
+## Step 2: Twitter 提取 (nitter 代理)
+
+Twitter 官方页面需要 JS 渲染，使用 nitter.net 代理：
+
+### 2.1 转换 URL
+
+```
+原链接: https://twitter.com/user/status/123456
+代理: https://nitter.net/user/status/123456
+```
+
+### 2.2 下载页面
+
+```bash
+curl -s "https://nitter.net/user/status/123456" -o /tmp/twitter.html
+```
+
+### 2.3 提取内容
+
+```bash
+# 推文正文
+grep -oP '<div class="tweet-content.*?">.*?</div>' /tmp/twitter.html
+
+# 作者
+grep -oP '<a class="fullname.*?">.*?</a>' /tmp/twitter.html | head -1
+
+# 时间
+grep -oP '<span title="[^"]*"' /tmp/twitter.html | head -1
+```
+
+### Twitter 可提取内容
+
+| 字段 | 状态 |
+|------|------|
+| 推文正文 | ✅ |
+| 作者 | ✅ |
+| 时间 | ✅ |
+| 图片 | ✅ |
+| 回复 | ⚠️ 需要额外请求 |
 
 ## Step 3: 识别论文信息
 
@@ -97,15 +152,13 @@ agent-browser screenshot /tmp/social_page.png
 
 ### 3.2 论文标题
 
-- 引言中的 "推荐论文：XXX"
-- 论文链接的标题
+- 正文中的 "推荐论文：XXX"
 - 从 arXiv 页面获取
 
 ### 3.3 其他信息
 
 - DOI
 - 会议/期刊名称
-- 作者
 - GitHub 链接
 
 ## Step 4: 整理输出
@@ -120,25 +173,14 @@ agent-browser screenshot /tmp/social_page.png
     "name": "博主/推主昵称",
     "id": "平台ID"
   },
-  "post_time": "发布时间",
   "content": "正文内容",
   "paper": {
     "arxiv_id": "2403.12345",
     "title": "论文标题",
-    "url": "https://arxiv.org/abs/2403.12345",
-    "doi": null,
-    "venue": "arXiv",
-    "github": null
+    "url": "https://arxiv.org/abs/2403.12345"
   },
-  "comments": [
-    {
-      "author": "评论者",
-      "content": "评论内容",
-      "likes": 10
-    }
-  ],
-  "extracted_at": "提取时间",
-  "warning": "⚠️ 以上内容来自社交平台，博主观点和评论不代表论文原文，请以原始论文为准"
+  "image_path": "/root/.openclaw/workspace/.cache/social-images/xxx.jpg",
+  "warning": "⚠️ 以上内容来自社交平台，博主观点不代表论文原文，请以原始论文为准"
 }
 ```
 
@@ -149,22 +191,12 @@ agent-browser screenshot /tmp/social_page.png
 ```
 传递给 paper-reader:
 - 论文 URL (arXiv/DOI)
-- 社交上下文（博主观点 + 评论）
+- 社交上下文（博主观点）
 ```
 
 paper-reader 会在生成的 Obsidian 笔记中添加「发现来源」section。
 
 ## 错误处理
-
-### 页面需要登录
-
-```
-⚠️ 该小红书页面需要登录才能查看完整内容。
-
-建议：
-1. 你可以在小红书 App 中查看并告诉我论文标题
-2. 或者提供论文的 arXiv 链接
-```
 
 ### 未找到论文信息
 
@@ -179,7 +211,7 @@ paper-reader 会在生成的 Obsidian 笔记中添加「发现来源」section�
 2. 你可以直接告诉我论文标题或 arXiv 链接
 ```
 
-### agent-browser 失败
+### curl 请求失败
 
 ```
 ⚠️ 无法访问该页面，可能原因：
@@ -194,33 +226,22 @@ paper-reader 会在生成的 Obsidian 笔记中添加「发现来源」section�
 
 ### 小红书链接
 
-用户：`https://www.xiaohongshu.com/explore/xxx`
+用户：`http://xhslink.com/o/xxx`
 
 执行流程：
-1. agent-browser 打开页面
-2. 提取正文："推荐一篇 CVPR 2024 的论文，arXiv:2403.12345..."
-3. 识别论文：arXiv:2403.12345
-4. 提取博主观点 + 前 10 条评论
-5. 调用 paper-reader 阅读论文
-6. 生成 Obsidian 笔记（含来源信息）
-
-### Twitter 链接
-
-用户：`https://twitter.com/user/status/xxx`
-
-执行流程：
-1. agent-browser 打开页面
-2. 提取推文内容
-3. 识别论文信息
-4. 提取前 10 条回复
-5. 调用 paper-reader 阅读论文
-6. 生成 Obsidian 笔记（含来源信息）
+1. curl 下载页面
+2. 正则提取标题、正文、作者、点赞数
+3. 下载图片到 `.cache/social-images/`
+4. read 查看图片内容
+5. 识别论文 arXiv ID
+6. 调用 paper-reader 阅读论文
+7. 生成 Obsidian 笔记（含来源信息）
 
 ## 注意事项
 
 1. **内容可信度**：始终提醒用户社交平台内容是二手解读
-2. **截图不保存**：只用于临时分析，不存入 Obsidian
-3. **评论数量**：最多提取前 10 条热门评论
+2. **图片仅供 AI 查看**：图片存放在 `.cache/` 目录，不发送给用户
+3. **评论暂不支持**：小红书评论是 JS 动态加载，curl 无法获取
 4. **隐私保护**：不记录用户的社交平台登录信息
 
 ## 与 paper-reader 的协作
@@ -228,8 +249,9 @@ paper-reader 会在生成的 Obsidian 笔记中添加「发现来源」section�
 ```
 ┌─────────────────────────┐
 │  social-paper-finder    │
-│  提取论文信息            │
-│  收集社交上下文          │
+│  curl 提取内容           │
+│  下载图片到 .cache/      │
+│  识别论文信息            │
 └─────────────────────────┘
            │
            ▼ 传递论文 URL + 社交上下文
