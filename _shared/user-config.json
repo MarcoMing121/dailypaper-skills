@@ -1,8 +1,9 @@
 {
   "VAULT_PATH": "/root/.openclaw/workspace/ObsidianVault",
-  "NOTES_PATH": "/root/.openclaw/workspace/ObsidianVault/论文笔记",
-  "CONCEPTS_PATH": "/root/.openclaw/workspace/ObsidianVault/论文笔记/_概念",
-  "DAILY_PAPERS_PATH": "/root/.openclaw/workspace/ObsidianVault/每日论文",
+  "NOTES_PATH": "/root/.openclaw/workspace/ObsidianVault/Papers",
+  "CONCEPTS_PATH": "/root/.openclaw/workspace/ObsidianVault/Concepts",
+  "ASSETS_PATH": "/root/.openclaw/workspace/ObsidianVault/assets",
+  "DAILY_PAPERS_PATH": "/root/.openclaw/workspace/ObsidianVault/DailyPapers",
   "ZOTERO_DB": "/path/to/zotero.sqlite",
   "ZOTERO_STORAGE": "/path/to/zotero/storage",
   "AUTO_REFRESH_INDEXES": true,
