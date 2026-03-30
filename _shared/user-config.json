@@ -3,6 +3,7 @@
   "NOTES_PATH": "/root/.openclaw/workspace/ObsidianVault/Papers",
   "CONCEPTS_PATH": "/root/.openclaw/workspace/ObsidianVault/Concepts",
   "ASSETS_PATH": "/root/.openclaw/workspace/ObsidianVault/assets",
+  "TOPIC_MOC_PATH": "/root/.openclaw/workspace/ObsidianVault/Concepts/MOCs",
   "DAILY_PAPERS_PATH": "/root/.openclaw/workspace/ObsidianVault/DailyPapers",
   "ZOTERO_DB": "/path/to/zotero.sqlite",
   "ZOTERO_STORAGE": "/path/to/zotero/storage",

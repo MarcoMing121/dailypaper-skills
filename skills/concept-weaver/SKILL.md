@@ -121,27 +121,39 @@ LeWorldModel  0.30     0.25      0.80         -
 | Thinking+Acting | ❌ | ✅ |
 ```
 
-#### 5.2 生成概念 MOC
+#### 5.2 生成主题 MOC
 
-创建概念聚合页面：
+运行脚本生成主题聚合页面：
+
+```bash
+python3 ../_shared/generate_topic_mocs.py
+```
+
+**输出位置**：`{TOPIC_MOC_PATH}/`（配置中的 `Concepts/MOCs/`）
+
+**生成的 MOC 示例**：
 
 ```markdown
-# VLA 持续学习
+# VLA-持续学习
 
-## 核心问题
-VLA 在学习新任务时如何避免灾难性遗忘？
+**核心问题**: VLA 模型如何在学习新任务时避免遗忘？
+
+共 3 篇相关论文
 
 ## 解决方案
 
 | 方法 | 核心思想 | 论文 |
 |------|----------|------|
-| Adapter 扩展 | 冻结旧参数，添加轻量 adapter | [[CLARE]] |
-| SG-MoE | 技能专家路由，统一 Thinking+Acting | [[AtomicVLA]] |
-| 世界模型 | 潜在空间预测，提供环境先验 | [[LeWorldModel]] |
+| CLARE | 无样本持续学习框架... | [[CLARE]] |
+| AtomicVLA | SG-MoE 技能专家路由... | [[AtomicVLA]] |
 
-## 对比分析
-...
+## 相关概念
+- [[Catastrophic_Forgetting]]
+- [[Adapter]]
+- [[MoE]]
 ```
+
+**主题发现规则**：基于论文标签匹配，见 `generate_topic_mocs.py` 中的 `topic_rules`。
 
 ### Step 6: 生成可视化（可选）
 
