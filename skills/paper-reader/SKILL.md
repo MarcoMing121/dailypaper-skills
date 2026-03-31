@@ -178,22 +178,49 @@ metadata:
 
 ### 图片获取流程（多源 fallback）
 
-**目标**: 确保笔记中包含论文的**所有 Figure**，先统计论文 Figure 总数再逐一获取。
+**⚠️ 核心原则：外链优先，本地兜底**
 
-1. WebSearch `"{论文标题} arxiv"` 获取 arXiv ID
-2. **来源 A — arXiv HTML**（首选）：
-   - WebFetch `https://arxiv.org/html/{arxiv_id}` 提取所有 `<figure>` 的标题与 img src URL
-   - 统计论文 Figure 总数，确认提取数量是否完整
-3. **来源 B — 项目主页**（HTML 404 或图片不全时）：
-   - 从摘要/HTML 中查找项目主页 URL（常见模式：`project page`、`github.io`、`our website`）
-   - WebFetch 项目主页，提取展示图片（通常包含 teaser / demo 图）
-4. **来源 C — PDF 提取**（前两者都失败时）：
-   - `pdfimages -png` 从 PDF 中提取，筛选 >10KB 的有效图片
-5. 笔记中用 `![Figure X](url)` 外链嵌入
-6. 验证：外链可加载 / 本地文件 >10KB
-7. **URL 去重**：写入前检查 URL 中是否有重复的 arxiv_id 路径段（如 `2603.05312v1/2603.05312v1/`），有则删除重复段。详见 `references/image-troubleshooting.md`
+> **为什么外链优先？**
+> - 减小仓库体积
+> - 图片与 arXiv 保持同步
+> - 只下载必要的图片
 
-> ar5iv 编号不一定对应 Figure 编号，排错见 `references/image-troubleshooting.md`
+### 流程（严格按顺序执行）
+
+**Step 1: arXiv HTML（首选）**
+```bash
+# 1. WebFetch arXiv HTML
+curl -sL "https://arxiv.org/html/{arxiv_id}" -o /tmp/paper_html.txt
+
+# 2. 提取所有 <figure> 和 <img> 标签
+grep -E '<figure|<figcaption|<img.*src=' /tmp/paper_html.txt
+
+# 3. 用外链写入笔记
+# 例如：![Figure 1](https://arxiv.org/html/2303.11165v2/x1.png)
+```
+
+**Step 2: 项目主页（HTML 404 或图片不全时）**
+```bash
+# 1. 从摘要/HTML 查找项目主页 URL
+grep -E 'project page|github.io|our website' /tmp/paper_html.txt
+
+# 2. WebFetch 项目主页
+# 3. 提取图片 URL
+# 4. 用外链写入笔记
+```
+
+**Step 3: PDF 提取（最后手段）**
+```bash
+# 只在前两者都失败时使用
+pdfimages -png paper.pdf output_prefix
+# 筛选 >10KB 的有效图片
+```
+
+### ⚠️ 禁止事项
+
+- ❌ **禁止直接跳到 PDF 提取**（必须先尝试 arXiv HTML）
+- ❌ **禁止下载所有图片**（只下载不可达的）
+- ❌ **禁止跳过可达性检查**（必须运行 download_note_images.py）
 
 ### 图片可靠性保障（生成后自动执行）
 
@@ -205,6 +232,8 @@ python3 ../daily-papers/download_note_images.py "{笔记完整路径}"
 
 - 可达的外链保持不动，不可达的自动下载到 `assets/` 并替换为 Obsidian wikilink
 - 如有本地化操作，frontmatter `image_source` 自动更新为 `mixed`
+
+**这就是为什么外链优先**：脚本会自动处理不可达的图片，我们不需要预先下载所有图片。
 
 ### 公式格式
 
