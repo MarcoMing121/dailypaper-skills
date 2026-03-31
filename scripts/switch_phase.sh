@@ -14,8 +14,8 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # 脚本路径
-PHASE_MANAGER="/root/.openclaw/workspace/dailypaper-skills/scripts/phase_manager.py"
-CRON_MANAGER="/root/.openclaw/workspace/dailypaper-skills/scripts/cron_manager.py"
+PHASE_MANAGER="/root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/phase_manager.py"
+CRON_MANAGER="/root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/cron_manager.py"
 
 if [ ! -f "$PHASE_MANAGER" ] || [ ! -f "$CRON_MANAGER" ]; then
     echo -e "${RED}❌ 错误: 找不到必要的脚本文件${NC}"

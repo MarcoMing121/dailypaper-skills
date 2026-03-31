@@ -23,7 +23,7 @@ metadata:
 
 所有下载的图片存放在：
 ```
-/root/.openclaw/workspace/.cache/social-images/
+/root/.openclaw/workspaces/paper-agent/.cache/social-images/
 ```
 
 定期清理：cron job 每天凌晨 3 点清理超过 7 天的图片。
@@ -77,14 +77,14 @@ img_url=$(grep -oP 'urlDefault":"[^"]*' /tmp/xhs.html | head -1 | sed 's/urlDefa
 
 # 下载到缓存目录（以笔记 ID 命名）
 note_id=$(grep -oP '"noteId":"[^"]*"' /tmp/xhs.html | head -1 | sed 's/"noteId":"//g' | sed 's/"//g')
-curl -s "$img_url" -o "/root/.openclaw/workspace/.cache/social-images/${note_id}.jpg"
+curl -s "$img_url" -o "/root/.openclaw/workspaces/paper-agent/.cache/social-images/${note_id}.jpg"
 ```
 
 ### 1.7 读取图片内容
 
 使用 `read` 工具读取下载的图片，查看内容：
 ```bash
-read /root/.openclaw/workspace/.cache/social-images/${note_id}.jpg
+read /root/.openclaw/workspaces/paper-agent/.cache/social-images/${note_id}.jpg
 ```
 
 ### 小红书可提取内容
@@ -179,7 +179,7 @@ grep -oP '<span title="[^"]*"' /tmp/twitter.html | head -1
     "title": "论文标题",
     "url": "https://arxiv.org/abs/2403.12345"
   },
-  "image_path": "/root/.openclaw/workspace/.cache/social-images/xxx.jpg",
+  "image_path": "/root/.openclaw/workspaces/paper-agent/.cache/social-images/xxx.jpg",
   "warning": "⚠️ 以上内容来自社交平台，博主观点不代表论文原文，请以原始论文为准"
 }
 ```

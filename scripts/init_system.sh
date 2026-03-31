@@ -6,24 +6,24 @@ echo "========================"
 
 # 设置执行权限
 echo "📝 设置脚本权限..."
-chmod +x /root/.openclaw/workspace/dailypaper-skills/scripts/switch_phase.sh
-chmod +x /root/.openclaw/workspace/dailypaper-skills/scripts/cron_manager.py
-chmod +x /root/.openclaw/workspace/dailypaper-skills/scripts/phase_manager.py
-chmod +x /root/.openclaw/workspace/dailypaper-skills/scripts/reminder_system.py
+chmod +x /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/switch_phase.sh
+chmod +x /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/cron_manager.py
+chmod +x /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/phase_manager.py
+chmod +x /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/reminder_system.py
 
 echo "✅ 脚本权限设置完成"
 
 # 设置初始阶段
 echo -e "\n🎯 设置初始阶段为 phase1_manual"
-python3 /root/.openclaw/workspace/dailypaper-skills/scripts/phase_manager.py set phase1_manual
+python3 /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/phase_manager.py set phase1_manual
 
 # 应用初始cron配置
 echo -e "\n🔄 应用初始cron配置"
-python3 /root/.openclaw/workspace/dailypaper-skills/scripts/cron_manager.py apply
+python3 /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/cron_manager.py apply
 
 # 创建每日提醒cron
 echo -e "\n⏰ 设置每日提醒 (每天上午8点)"
-echo "0 8 * * * cd /root/.openclaw/workspace/dailypaper-skills && python3 scripts/reminder_system.py" | crontab -
+echo "0 8 * * * cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills && python3 scripts/reminder_system.py" | crontab -
 
 echo -e "\n🎉 系统初始化完成!"
 echo ""

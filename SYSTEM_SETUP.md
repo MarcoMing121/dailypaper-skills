@@ -184,8 +184,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 检查Python脚本是否存在
-PHASE_MANAGER="/root/.openclaw/workspace/dailypaper-skills/scripts/phase_manager.py"
-CRON_MANAGER="/root/.openclaw/workspace/dailypaper-skills/scripts/cron_manager.py"
+PHASE_MANAGER="/root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/phase_manager.py"
+CRON_MANAGER="/root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/cron_manager.py"
 
 if [ ! -f "$PHASE_MANAGER" ]; then
     echo -e "${RED}❌ 错误: 找不到阶段管理器 ($PHASE_MANAGER)${NC}"
@@ -350,7 +350,7 @@ class ReminderSystem:
 
 🔄 快速切换命令:
 ```bash
-cd /root/.openclaw/workspace/dailypaper-skills
+cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills
 ./scripts/switch_phase.sh check    # 检查是否该切换
 ./scripts/switch_phase.sh next     # 切换到下一阶段
 ./scripts/switch_phase.sh phase2_smart  # 切换到智能阶段
@@ -400,24 +400,24 @@ echo "🚀 初始化论文研究系统"
 echo "========================"
 
 # 设置执行权限
-chmod +x /root/.openclaw/workspace/dailypaper-skills/scripts/switch_phase.sh
-chmod +x /root/.openclaw/workspace/dailypaper-skills/scripts/cron_manager.py
-chmod +x /root/.openclaw/workspace/dailypaper-skills/scripts/phase_manager.py
-chmod +x /root/.openclaw/workspace/dailypaper-skills/scripts/reminder_system.py
+chmod +x /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/switch_phase.sh
+chmod +x /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/cron_manager.py
+chmod +x /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/phase_manager.py
+chmod +x /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/reminder_system.py
 
 echo "✅ 脚本权限设置完成"
 
 # 设置初始阶段
 echo -e "\n🎯 设置初始阶段为 phase1_manual"
-python3 /root/.openclaw/workspace/dailypaper-skills/scripts/phase_manager.py set phase1_manual
+python3 /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/phase_manager.py set phase1_manual
 
 # 应用初始cron配置
 echo -e "\n🔄 应用初始cron配置"
-python3 /root/.openclaw/workspace/dailypaper-skills/scripts/cron_manager.py apply
+python3 /root/.openclaw/workspaces/paper-agent/dailypaper-skills/scripts/cron_manager.py apply
 
 # 创建每日提醒cron
 echo -e "\n⏰ 设置每日提醒 (每天上午8点)"
-echo "0 8 * * * cd /root/.openclaw/workspace/dailypaper-skills && python3 scripts/reminder_system.py" | crontab -
+echo "0 8 * * * cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills && python3 scripts/reminder_system.py" | crontab -
 
 echo -e "\n🎉 系统初始化完成!"
 echo ""
@@ -435,7 +435,7 @@ echo "   手动深度阅读，基础概念建设"
 ### 立即部署命令:
 ```bash
 # 1. 运行初始化脚本
-cd /root/.openclaw/workspace/dailypaper-skills
+cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills
 ./scripts/init_system.sh
 
 # 2. 检查当前状态

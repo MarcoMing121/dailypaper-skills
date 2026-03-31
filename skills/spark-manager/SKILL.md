@@ -325,7 +325,7 @@ AI:
 
 ```json
 {
-  "VAULT_PATH": "/root/.openclaw/workspace/ObsidianVault",
+  "VAULT_PATH": "/root/.openclaw/shared/ObsidianVault",
   "SPARK_PATH": "{VAULT_PATH}/灵光一现"
 }
 ```

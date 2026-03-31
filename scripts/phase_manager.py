@@ -77,7 +77,7 @@ class PhaseManager:
         }
     }
     
-    def __init__(self, config_file: str = "/root/.openclaw/workspace/dailypaper-skills/_shared/user-config.json"):
+    def __init__(self, config_file: str = "/root/.openclaw/workspaces/paper-agent/dailypaper-skills/_shared/user-config.json"):
         self.config_file = Path(config_file)
         self.current_phase_file = Path("/tmp/current_phase")
         
@@ -133,15 +133,15 @@ class PhaseManager:
                     continue
                     
                 if task_name == 'smart_trigger':
-                    cmd = f"cd /root/.openclaw/workspace/dailypaper-skills && python3 scripts/smart_trigger.py"
+                    cmd = f"cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills && python3 scripts/smart_trigger.py"
                 elif task_name == 'concept_weaver_incremental':
-                    cmd = f"cd /root/.openclaw/workspace/dailypaper-skills && python3 skills/concept-weaver/scripts/weave_concepts.py --notes-dir \"/root/.openclaw/workspace/ObsidianVault/论文笔记\" --update-mode incremental"
+                    cmd = f"cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills && python3 skills/concept-weaver/scripts/weave_concepts.py --notes-dir \"/root/.openclaw/shared/ObsidianVault/论文笔记\" --update-mode incremental"
                 elif task_name == 'concept_weaver_auto':
-                    cmd = f"cd /root/.openclaw/workspace/dailypaper-skills && python3 skills/concept-weaver/scripts/weave_concepts.py --notes-dir \"/root/.openclaw/workspace/ObsidianVault/论文笔记\" --update-mode auto"
+                    cmd = f"cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills && python3 skills/concept-weaver/scripts/weave_concepts.py --notes-dir \"/root/.openclaw/shared/ObsidianVault/论文笔记\" --update-mode auto"
                 elif task_name == 'generate_mocs':
-                    cmd = f"cd /root/.openclaw/workspace/dailypaper-skills && python3 skills/generate-mocs/SKILL.py"
+                    cmd = f"cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills && python3 skills/generate-mocs/SKILL.py"
                 elif task_name == 'deep_analysis':
-                    cmd = f"cd /root/.openclaw/workspace/dailypaper-skills && python3 skills/concept-weaver/scripts/weave_concepts.py --notes-dir \"/root/.openclaw/workspace/ObsidianVault/论文笔记\" --update-mode full"
+                    cmd = f"cd /root/.openclaw/workspaces/paper-agent/dailypaper-skills && python3 skills/concept-weaver/scripts/weave_concepts.py --notes-dir \"/root/.openclaw/shared/ObsidianVault/论文笔记\" --update-mode full"
                 else:
                     continue
                 
