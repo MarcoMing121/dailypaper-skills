@@ -189,14 +189,51 @@ metadata:
 
 **Step 1: arXiv HTML（首选）**
 ```bash
-# 1. WebFetch arXiv HTML
-curl -sL "https://arxiv.org/html/{arxiv_id}" -o /tmp/paper_html.txt
+# 1. 检查官方 HTML
+curl -sI "https://arxiv.org/html/{arxiv_id}" | head -1
 
-# 2. 提取所有 <figure> 和 <img> 标签
-grep -E '<figure|<figcaption|<img.*src=' /tmp/paper_html.txt
+# 如果返回 200，提取图片
+curl -sL "https://arxiv.org/html/{arxiv_id}" | grep -E '<figure|<img.*src='
 
-# 3. 用外链写入笔记
-# 例如：![Figure 1](https://arxiv.org/html/2303.11165v2/x1.png)
+# 如果返回 404，检查镜像站！
+curl -sI "https://ar5iv.org/html/{arxiv_id}" | head -1
+```
+
+**⚠️ 重要：镜像站 (ar5iv)**
+
+**ar5iv.org 是 arXiv 的官方 HTML 镜像，比 arxiv.org/html 更可靠！**
+
+| 站点 | 类型 | 可靠性 | URL 格式 |
+|------|------|--------|----------|
+| **arxiv.org/html** | 官方 HTML | 可能 404 | `https://arxiv.org/html/{arxiv_id}` |
+| **ar5iv.org** | 镜像站 | ✅ 高 | `https://ar5iv.org/html/{arxiv_id}` |
+| **ar5iv.labs.arxiv.org** | 实验室版 | ✅ 高 | `https://ar5iv.labs.arxiv.org/html/{arxiv_id}` |
+
+**检查顺序**：
+```
+1. arxiv.org/html (官方)
+   ├─ 200 → 用外链
+   └─ 404 → 检查镜像站
+   
+2. ar5iv.org (镜像站) ← 必须检查！
+   ├─ 200 → 用外链
+   └─ 404 → 检查实验室版本
+   
+3. ar5iv.labs.arxiv.org
+   ├─ 200 → 用外链
+   └─ 404 → 检查项目主页
+```
+
+**图片 URL 格式**：
+```
+官方：https://arxiv.org/html/2303.11165/assets/x1.png
+镜像：https://ar5iv.labs.arxiv.org/html/2303.11165/assets/x1.png
+```
+
+**验证图片可达性**：
+```bash
+curl -sI "https://ar5iv.labs.arxiv.org/html/2303.11165/assets/x1.png" | head -1
+# 返回 HTTP/2 200 表示可达
 ```
 
 **Step 2: 项目主页（HTML 404 或图片不全时）**
