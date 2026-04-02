@@ -21,21 +21,18 @@ metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 
 显式生成并在后续统一使用这些变量：
 
-- `VAULT_PATH`
-- `DAILY_PAPERS_PATH`
-- `KEYWORDS`
-- `NEGATIVE_KEYWORDS`
-- `DOMAIN_BOOST_KEYWORDS`
-- `ARXIV_CATEGORIES`
-- `MIN_SCORE`
-- `TOP_N`
+- `VAULT_PATH` = `obsidian_vault` from config
+- `DAILY_PAPERS_PATH` = `{VAULT_PATH}/{daily_papers_folder}`
+- `KEYWORDS` = `daily_papers.keywords` from config
+- `NEGATIVE_KEYWORDS` = `daily_papers.negative_keywords` from config
+- `DOMAIN_BOOST_KEYWORDS` = `daily_papers.domain_boost_keywords` from config
+- `ARXIV_CATEGORIES` = `daily_papers.arxiv_categories` from config
+- `MIN_SCORE` = `daily_papers.min_score` from config
+- `TOP_N` = `daily_papers.top_n` from config
 
-其中：
-
-- `DAILY_PAPERS_PATH = {VAULT_PATH}/{daily_papers_folder}`
-- 所有关键词、分类、阈值都以共享配置为准
-
-后续统一以共享配置和上面的变量为准。
+**关键**：所有路径和参数都从配置读取，不硬编码。配置来源：
+1. `../_shared/user-config.json` — 默认配置
+2. `../_shared/user-config.local.json` — 本地覆盖（如存在）
 
 ## 解析天数
 

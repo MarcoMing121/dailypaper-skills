@@ -20,23 +20,18 @@ metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 
 显式生成并在后续统一使用这些变量：
 
-- `VAULT_PATH`
-- `NOTES_PATH`
-- `CONCEPTS_PATH`
-- `DAILY_PAPERS_PATH`
-- `AUTO_REFRESH_INDEXES`
-- `GIT_COMMIT_ENABLED`
-- `GIT_PUSH_ENABLED`
+- `VAULT_PATH` = `obsidian_vault` from config
+- `NOTES_PATH` = `{VAULT_PATH}/{paper_notes_folder}`
+- `CONCEPTS_PATH` = `{VAULT_PATH}/{concepts_folder}`
+- `DAILY_PAPERS_PATH` = `{VAULT_PATH}/{daily_papers_folder}`
+- `AUTO_REFRESH_INDEXES` = `automation.auto_refresh_indexes` from config
+- `GIT_COMMIT_ENABLED` = `automation.git_commit` from config
+- `GIT_PUSH_ENABLED` = `automation.git_push` from config (only true if `GIT_COMMIT_ENABLED=true`)
 - `ENRICHED_INPUT = /tmp/daily_papers_enriched.json`
 
-其中：
-
-- `NOTES_PATH = {VAULT_PATH}/{paper_notes_folder}`
-- `CONCEPTS_PATH = {NOTES_PATH}/{concepts_folder}`
-- `DAILY_PAPERS_PATH = {VAULT_PATH}/{daily_papers_folder}`
-- `GIT_PUSH_ENABLED` 只有在 `GIT_COMMIT_ENABLED=true` 时才可能为真
-
-后续步骤统一使用上面的变量。
+**关键**：所有路径都从配置读取，不硬编码。配置来源：
+1. `../_shared/user-config.json` — 默认配置
+2. `../_shared/user-config.local.json` — 本地覆盖（如存在）
 
 ## 前置检查
 
