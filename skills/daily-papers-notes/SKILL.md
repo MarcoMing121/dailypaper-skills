@@ -32,7 +32,7 @@ metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 其中：
 
 - `NOTES_PATH = {VAULT_PATH}/{paper_notes_folder}`
-- `CONCEPTS_PATH = {NOTES_PATH}/{concepts_folder}`
+- `CONCEPTS_PATH = {VAULT_PATH}/{concepts_folder}`
 - `DAILY_PAPERS_PATH = {VAULT_PATH}/{daily_papers_folder}`
 - `GIT_PUSH_ENABLED` 只有在 `GIT_COMMIT_ENABLED=true` 时才可能为真
 

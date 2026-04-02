@@ -73,10 +73,10 @@ metadata:
 显式生成并在后续统一使用这些变量：
 
 - `VAULT_PATH`
-- `NOTES_PATH` = `{VAULT_PATH}/Papers`
-- `CONCEPTS_PATH` = `{VAULT_PATH}/Concepts`
+- `NOTES_PATH` = `{VAULT_PATH}/{paper_notes_folder}`
+- `CONCEPTS_PATH` = `{VAULT_PATH}/{concepts_folder}`
 - `ASSETS_PATH` = `{VAULT_PATH}/assets`
-- `TOPIC_MOC_PATH` = `{VAULT_PATH}/Concepts/MOCs`
+- `TOPIC_MOC_PATH` = `{CONCEPTS_PATH}/MOCs`
 - `ZOTERO_DB`
 - `ZOTERO_STORAGE`
 - `AUTO_REFRESH_INDEXES`
