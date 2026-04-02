@@ -19,6 +19,33 @@ metadata:
 
 发现论文之间的隐藏关联，构建知识网络。
 
+## 运行模式
+
+### 增量模式（默认）
+
+只处理新增/修改的论文，通过 `.weaver_state.json` 记录处理历史。
+
+```bash
+python3 scripts/weave_concepts.py --notes-dir "/path/to/Papers" --concepts-dir "/path/to/Concepts/MOCs"
+```
+
+### 全量模式
+
+重新扫描所有论文：
+
+```bash
+python3 scripts/weave_concepts.py --notes-dir "/path/to/Papers" --concepts-dir "/path/to/Concepts/MOCs" --full-scan
+```
+
+### 更新范围
+
+| 选项 | 说明 |
+|------|------|
+| `--auto-update full` | 更新笔记关联 + 生成 MOC（默认） |
+| `--auto-update moc_only` | 只生成 MOC |
+| `--auto-update links_only` | 只更新笔记关联 |
+| `--auto-update none` | 只生成报告 |
+
 ## 工作流程
 
 ### Step 0: 读取配置
