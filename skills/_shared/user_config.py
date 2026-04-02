@@ -149,8 +149,7 @@ def daily_papers_dir() -> Path:
 
 
 def concepts_dir() -> Path:
-    # concepts_folder is relative to VAULT root, not paper_notes_dir
-    return obsidian_vault_path() / paths_config()["concepts_folder"]
+    return paper_notes_dir() / paths_config()["concepts_folder"]
 
 
 def zotero_db_path() -> Path:

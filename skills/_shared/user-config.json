@@ -1,9 +1,9 @@
 {
   "paths": {
-    "obsidian_vault": "/root/.openclaw/shared/ObsidianVault",
-    "paper_notes_folder": "Papers",
+    "obsidian_vault": "~/ObsidianVault",
+    "paper_notes_folder": "论文笔记",
     "daily_papers_folder": "DailyPapers",
-    "concepts_folder": "Concepts",
+    "concepts_folder": "_概念",
     "zotero_db": "~/Zotero/zotero.sqlite",
     "zotero_storage": "~/Zotero/storage"
   },

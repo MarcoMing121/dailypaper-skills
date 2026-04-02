@@ -26,7 +26,7 @@ metadata:
 只处理新增/修改的论文，通过 `.weaver_state.json` 记录处理历史。
 
 ```bash
-python3 scripts/weave_concepts.py --notes-dir "{NOTES_PATH}" --concepts-dir "{CONCEPTS_PATH}/MOCs"
+python3 scripts/weave_concepts.py --notes-dir "/path/to/Papers" --concepts-dir "/path/to/Concepts/MOCs"
 ```
 
 ### 全量模式
@@ -34,7 +34,7 @@ python3 scripts/weave_concepts.py --notes-dir "{NOTES_PATH}" --concepts-dir "{CO
 重新扫描所有论文：
 
 ```bash
-python3 scripts/weave_concepts.py --notes-dir "{NOTES_PATH}" --concepts-dir "{CONCEPTS_PATH}/MOCs" --full-scan
+python3 scripts/weave_concepts.py --notes-dir "/path/to/Papers" --concepts-dir "/path/to/Concepts/MOCs" --full-scan
 ```
 
 ### 更新范围
@@ -53,14 +53,12 @@ python3 scripts/weave_concepts.py --notes-dir "{NOTES_PATH}" --concepts-dir "{CO
 ```bash
 # 读取共享配置
 cat ../_shared/user-config.json
-# 如果存在本地覆盖
-cat ../_shared/user-config.local.json
 ```
 
 获取：
-- `VAULT_PATH` = `obsidian_vault` from config
-- `NOTES_PATH` = `{VAULT_PATH}/{paper_notes_folder}`
-- `CONCEPTS_PATH` = `{VAULT_PATH}/{concepts_folder}`
+- `VAULT_PATH`
+- `NOTES_PATH`
+- `CONCEPTS_PATH`
 
 ### Step 1: 扫描现有笔记
 
