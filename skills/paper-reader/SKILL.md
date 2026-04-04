@@ -129,71 +129,179 @@ metadata:
 
 > Zotero 详细操作见 `references/zotero-guide.md`
 
-### ⚠️ 1.5 分块读取大论文（CRITICAL - 防止内存溢出）
+### ⚠️ 1.5 并行分块提取大论文（CRITICAL - Subagent 模式）
 
-> **历史教训 (2026-04-04)**：处理 ReconVLA (2508.10333) 时，一次性读取 142KB HTML 导致 "unknown error"。
+> **更新 (2026-04-04)**：改用 subagent 并行处理，提升大论文处理效率。
 
 #### 问题
 - arXiv HTML 可能很大（100KB+，1742 行）
 - 一次性读取会导致 API 超时、token 超限、模型处理失败
+- **串行分块读取速度慢**
 
-#### 解决方案：分块读取
+#### 解决方案：并行 Subagent 提取
 
-**文件大小检查流程：**
+**核心思路**：
+- 每个 chunk 由一个独立的 subagent 处理
+- 所有 subagent **并行运行**
+- 主 session 汇总结果后生成笔记
 
-```bash
-# 1. 下载 HTML 后，先检查行数
-wc -l /tmp/paper_*.html
+**流程图**：
 
-# 2. 如果总行数 > 500，必须分块读取
-# 3. 单次读取限制：最多 300 行
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Main Session                                                │
+│  1. 下载 HTML → 检查行数                                      │
+│  2. 分割成 chunks（每块 ≤300 行）                             │
+│  3. 并行 spawn subagents                                     │
+│     ├─ Subagent 1 (chunk 1) ──┐                             │
+│     ├─ Subagent 2 (chunk 2) ──┼──→ 返回结构化 JSON           │
+│     ├─ Subagent 3 (chunk 3) ──┤                             │
+│     └─ Subagent N (chunk N) ──┘                             │
+│  4. 汇总所有 JSON 结果                                        │
+│  5. 生成完整笔记                                              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**分块读取策略：**
-
-| 内容 | 行数范围 | 说明 |
-|------|---------|------|
-| **块1** | 行 1-300 | Title + Abstract + Introduction 前半部分 |
-| **块2** | 行 301-600 | Introduction 剩余 + Method 部分 |
-| **块3** | 行 601-900 | Method 剩余 + Experiments 开头 |
-| **块4** | 行 901-1200 | Experiments 详细结果 |
-| **块5** | 行 1200+ | 剩余部分（Conclusion + References）|
-
-**执行命令示例：**
+#### Step 1: 下载与分割
 
 ```bash
-# 下载论文 HTML
-curl -sL "https://arxiv.org/html/2508.10333" -o /tmp/paper_reconvla.html
+# 1. 下载 HTML
+ARXIV_ID="2508.10333"
+curl -sL "https://arxiv.org/html/${ARXIV_ID}" -o /tmp/paper_${ARXIV_ID}.html
 
-# 检查行数
-wc -l /tmp/paper_reconvla.html  # 结果: 1742 行 > 500，需要分块
+# 2. 检查行数
+LINES=$(wc -l < /tmp/paper_${ARXIV_ID}.html)
+echo "Total lines: $LINES"
 
-# 提取各部分到单独文件
-head -n 300 /tmp/paper_reconvla.html > /tmp/paper_part1.html    # Title + Abstract + Intro
-sed -n '301,600p' /tmp/paper_reconvla.html > /tmp/paper_part2.html  # Method
-sed -n '601,900p' /tmp/paper_reconvla.html > /tmp/paper_part3.html  # Experiments
+# 3. 如果 > 500，分割成 chunks
+if [ $LINES -gt 500 ]; then
+  # 每块最多 300 行
+  CHUNK_SIZE=300
+  NUM_CHUNKS=$(( ($LINES + $CHUNK_SIZE - 1) / $CHUNK_SIZE ))
+  
+  for i in $(seq 1 $NUM_CHUNKS); do
+    START=$(( ($i - 1) * $CHUNK_SIZE + 1 ))
+    END=$(( $i * $CHUNK_SIZE ))
+    [ $END -gt $LINES ] && END=$LINES
+    sed -n "${START},${END}p" /tmp/paper_${ARXIV_ID}.html > /tmp/paper_chunk_${i}.html
+    echo "Created chunk $i: lines $START-$END"
+  done
+fi
+
+# 4. 提取图片 URLs（独立于文本分块）
+grep -E '<img.*src=' /tmp/paper_${ARXIV_ID}.html | \
+  sed 's/.*src="\([^"]*\)".*/\1/' > /tmp/images_${ARXIV_ID}.txt
 ```
+
+#### Step 2: 并行 Spawn Subagents
+
+**使用 `sessions_spawn` 并行启动多个 subagent**：
+
+```xml
+<!-- 每个 chunk 一个 subagent，并行运行 -->
+<sessions_spawn runtime="subagent" mode="run" 
+  task="Extract structured information from /tmp/paper_chunk_1.html (lines 1-300).
+        Return JSON with: {sections, figures, formulas, tables, key_insights}." 
+  label="chunk-1-extractor" />
+
+<sessions_spawn runtime="subagent" mode="run"
+  task="Extract structured information from /tmp/paper_chunk_2.html (lines 301-600).
+        Return JSON with: {sections, figures, formulas, tables, key_insights}." 
+  label="chunk-2-extractor" />
+
+<!-- ... 更多 subagents ... -->
+```
+
+**关键点**：
+- `mode="run"` — 一次性任务，完成后自动结束
+- 不指定 `timeoutSeconds` — 让 subagent 自然完成
+- **所有 subagent 同时启动**，无需等待前一个
+
+#### Step 3: Subagent 输出格式
+
+**每个 subagent 必须返回结构化 JSON**：
+
+```json
+{
+  "chunk_id": 1,
+  "lines": "1-300",
+  "sections": [
+    {
+      "title": "Introduction",
+      "content": "核心内容摘要..."
+    }
+  ],
+  "figures": [
+    {
+      "id": "Figure 1",
+      "caption": "...",
+      "url": "https://arxiv.org/html/xxx/assets/x1.png"
+    }
+  ],
+  "formulas": [
+    {
+      "name": "Loss Function",
+      "latex": "$$L = \\sum_{i} ...$$",
+      "meaning": "损失函数定义",
+      "symbols": {"L": "loss", "i": "index"}
+    }
+  ],
+  "tables": [
+    {
+      "id": "Table 1",
+      "caption": "实验结果对比",
+      "content": "Markdown 表格..."
+    }
+  ],
+  "key_insights": [
+    "本文提出的方法...",
+    "核心贡献是..."
+  ]
+}
+```
+
+#### Step 4: 主 Session 汇总
+
+**等待所有 subagent 完成后，汇总结果**：
+
+```bash
+# 检查 subagent 完成状态
+subagents action=list recentMinutes=5
+
+# 收集所有 subagent 的输出
+# (OpenClaw 会自动将 subagent 结果返回给主 session)
+```
+
+**汇总逻辑**：
+1. 合并所有 `sections` → 构建完整大纲
+2. 合并所有 `figures` → 确保图片数量完整
+3. 合并所有 `formulas` → 去重、检查符号一致性
+4. 合并所有 `tables` → 完整保留
+5. 合并所有 `key_insights` → 提取核心贡献
 
 #### 图片提取（独立于文本分块）
 
 图片 URLs 单独提取，不受分块限制：
 
 ```bash
-# 提取所有图片 URLs（一次性即可）
-grep -E '<img.*src=' /tmp/paper_reconvla.html | sed 's/.*src="\([^"]*\)".*/\1/' > /tmp/images.txt
+# 主 session 直接提取所有图片 URLs
+grep -E '<img.*src=' /tmp/paper_${ARXIV_ID}.html | \
+  sed 's/.*src="\([^"]*\)".*/\1/' > /tmp/images.txt
 ```
 
 #### 禁止事项
 
-- ❌ 禁止一次性 `read` 整个 HTML 文件（1000+ 行）
-- ❌ 禁止不检查文件大小就直接读取
-- ❌ 禁止跳过行数检查直接读取
+- ❌ 禁止在主 session 读取大 HTML 文件（>500 行）
+- ❌ 禁止串行等待每个 subagent（必须并行 spawn）
+- ❌ 禁止 subagent 返回非结构化文本（必须返回 JSON）
 
 #### 自检清单
 
 - [ ] 已检查 HTML 行数？
-- [ ] 行数 > 500 已分块？
-- [ ] 每块 ≤ 300 行？
+- [ ] 行数 > 500 已分割？
+- [ ] 所有 subagent 已并行启动？
+- [ ] 每个 subagent 返回了有效 JSON？
+- [ ] 已汇总所有 chunks 的结果？
 
 ---
 
@@ -440,9 +548,107 @@ ls Concepts/*/*Experience_Replay.md  # 应该找到文件
 
 ### 流程
 
-1. **扫描**论文笔记中所有 `[[概念]]` 链接
-2. **检查**每个链接对应的概念笔记是否存在（`ls` + `find`）
-3. **创建**不存在的概念（不可跳过），自动归类到对应子目录
+#### Step 1: 扫描概念链接
+
+```bash
+# 提取所有 [[概念]] 链接
+grep -oE '\[\[([A-Za-z0-9_-]+)\]\]' {笔记路径} | \
+  sed 's/\[\[\(.*\)\]\]/\1/' | sort -u
+```
+
+#### Step 2: 检查缺失概念
+
+```bash
+# 检查每个概念是否存在
+for concept in $(grep -oE '\[\[([A-Za-z0-9_-]+)\]\]' {笔记路径} | sed 's/\[\[\(.*\)\]\]/\1/' | sort -u); do
+  if ! find Concepts -name "${concept}.md" | grep -q .; then
+    echo "missing: $concept"
+  fi
+done
+```
+
+#### Step 3: 并行创建缺失概念（Subagent 模式）
+
+> **更新 (2026-04-04)**: 使用 subagent 并行创建概念，提升效率。
+
+**适用场景**：缺失概念 ≥ 3 个时使用并行模式
+
+**并行 Spawn 示例**：
+
+```xml
+<sessions_spawn runtime="subagent" mode="run"
+  task="Create concept note for Implicit_Grounding.
+        
+        1. Read the paper note at {VAULT_PATH}/Papers/2-VLA/ReconVLA.md
+        2. Extract definition, math formulas, key points about Implicit_Grounding
+        3. Create concept file at {VAULT_PATH}/Concepts/3-Architectures/Implicit_Grounding.md
+        4. Follow the template in references/concept-categories.md
+        5. Include ReconVLA as representative work
+        
+        Required sections:
+        - 定义 (one sentence definition with paper citation)
+        - 数学形式 (LaTeX with symbol explanation)
+        - 核心要点 (2-3 key points from paper)
+        - 代表工作 (list ReconVLA)
+        - 相关概念 (other concepts from the paper)"
+  label="concept-Implicit_Grounding" />
+
+<sessions_spawn runtime="subagent" mode="run"
+  task="Create concept note for Visual_Grounding..."
+  label="concept-Visual_Grounding" />
+
+<!-- 更多 subagents... -->
+```
+
+**关键点**：
+- `mode="run"` — 一次性任务，完成后自动结束
+- 所有 subagent **并行启动**
+- 每个 subagent 独立读取论文笔记并创建概念文件
+
+**优势**：
+
+| 方式 | 速度 | 上下文消耗 |
+|------|------|-----------|
+| 串行创建 | 3个×30秒=90秒 | 高（主 session 承担） |
+| 并行创建 | ~30秒完成全部 | 低（分散到 subagent） |
+
+#### Step 4: 主 Session 汇总
+
+等待所有 subagent 完成后，汇总结果：
+
+- 统计新增概念数量
+- 刷新概念目录页（如果 `AUTO_REFRESH_INDEXES=true`）
+
+### Subagent 任务模板
+
+**每个 subagent 必须接收完整的内容规范**：
+
+```
+Create concept note for {Concept_Name}.
+
+1. Read the paper note at {笔记路径}
+2. Extract from the paper:
+   - 定义: one sentence definition with paper citation
+   - 数学形式: LaTeX formula with symbol explanation
+   - 核心要点: 2-3 key points extracted from paper
+   - 代表工作: list the current paper
+   - 相关概念: other [[Concept]] links from the paper
+3. Determine concept category:
+   - 1-Foundations/: 基础概念、理论
+   - 2-Methods/: 方法、算法
+   - 3-Architectures/: 模型架构
+   - 4-RL/: 强化学习
+   - 5-Robotics/: 机器人相关
+   - 6-Techniques/: 具体技术
+   - 7-Datasets/: 数据集
+4. Create file at {CONCEPTS_PATH}/{category}/{Concept_Name}.md
+5. Use template from references/concept-categories.md
+```
+
+**禁止事项**：
+- ❌ 禁止简化指令（如"快速创建"、"精简版"）
+- ❌ 禁止跳过必填项
+- ❌ 禁止创建空概念
 
 ### 创建概念时必须填充内容
 
