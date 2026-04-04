@@ -129,6 +129,74 @@ metadata:
 
 > Zotero 详细操作见 `references/zotero-guide.md`
 
+### ⚠️ 1.5 分块读取大论文（CRITICAL - 防止内存溢出）
+
+> **历史教训 (2026-04-04)**：处理 ReconVLA (2508.10333) 时，一次性读取 142KB HTML 导致 "unknown error"。
+
+#### 问题
+- arXiv HTML 可能很大（100KB+，1742 行）
+- 一次性读取会导致 API 超时、token 超限、模型处理失败
+
+#### 解决方案：分块读取
+
+**文件大小检查流程：**
+
+```bash
+# 1. 下载 HTML 后，先检查行数
+wc -l /tmp/paper_*.html
+
+# 2. 如果总行数 > 500，必须分块读取
+# 3. 单次读取限制：最多 300 行
+```
+
+**分块读取策略：**
+
+| 内容 | 行数范围 | 说明 |
+|------|---------|------|
+| **块1** | 行 1-300 | Title + Abstract + Introduction 前半部分 |
+| **块2** | 行 301-600 | Introduction 剩余 + Method 部分 |
+| **块3** | 行 601-900 | Method 剩余 + Experiments 开头 |
+| **块4** | 行 901-1200 | Experiments 详细结果 |
+| **块5** | 行 1200+ | 剩余部分（Conclusion + References）|
+
+**执行命令示例：**
+
+```bash
+# 下载论文 HTML
+curl -sL "https://arxiv.org/html/2508.10333" -o /tmp/paper_reconvla.html
+
+# 检查行数
+wc -l /tmp/paper_reconvla.html  # 结果: 1742 行 > 500，需要分块
+
+# 提取各部分到单独文件
+head -n 300 /tmp/paper_reconvla.html > /tmp/paper_part1.html    # Title + Abstract + Intro
+sed -n '301,600p' /tmp/paper_reconvla.html > /tmp/paper_part2.html  # Method
+sed -n '601,900p' /tmp/paper_reconvla.html > /tmp/paper_part3.html  # Experiments
+```
+
+#### 图片提取（独立于文本分块）
+
+图片 URLs 单独提取，不受分块限制：
+
+```bash
+# 提取所有图片 URLs（一次性即可）
+grep -E '<img.*src=' /tmp/paper_reconvla.html | sed 's/.*src="\([^"]*\)".*/\1/' > /tmp/images.txt
+```
+
+#### 禁止事项
+
+- ❌ 禁止一次性 `read` 整个 HTML 文件（1000+ 行）
+- ❌ 禁止不检查文件大小就直接读取
+- ❌ 禁止跳过行数检查直接读取
+
+#### 自检清单
+
+- [ ] 已检查 HTML 行数？
+- [ ] 行数 > 500 已分块？
+- [ ] 每块 ≤ 300 行？
+
+---
+
 ## 2. 阅读模式
 
 | 模式         | 触发词                   | 输出                 |
@@ -340,6 +408,36 @@ Tags 判断：看 Related Work 小标题 + Abstract 关键词。第一个 tag �
 
 概念库位置：`{CONCEPTS_PATH}`
 
+### ⚠️ 链接格式规则（CRITICAL）
+
+**概念文件命名**: 使用下划线连接单词
+
+```
+✅ 正确: Experience_Replay.md
+❌ 错误: Experience Replay.md (空格)
+❌ 错误: Experience-Replay.md (连字符)
+```
+
+**概念链接格式**: 必须与文件名完全匹配
+
+```
+✅ 正确: [[Experience_Replay]]
+❌ 错误: [[Experience Replay]] (空格不匹配)
+❌ 错误: [[Experience-Replay]] (连字符不匹配)
+```
+
+**为什么必须用下划线？**
+- Obsidian 的 `[[Wiki Link]]` 语法会将空格视为合法，但文件系统更倾向于下划线
+- 保持一致性：文件名和链接必须一一对应
+- 避免"链接存在但无法跳转"的问题
+
+**检查方法**:
+```bash
+# 检查链接是否匹配文件
+# 如果链接是 [[Experience_Replay]]
+ls Concepts/*/*Experience_Replay.md  # 应该找到文件
+```
+
 ### 流程
 
 1. **扫描**论文笔记中所有 `[[概念]]` 链接
@@ -348,15 +446,24 @@ Tags 判断：看 Related Work 小标题 + Abstract 关键词。第一个 tag �
 
 ### 创建概念时必须填充内容
 
-使用 `references/concept-categories.md` 中的模板，从论文中提取以下信息填充：
+**⚠️ CRITICAL - 禁止创建空的概念笔记！**
 
-- **定义**：从论文中提取该概念的定义（Abstract/Introduction/Preliminary）
-- **数学形式**：论文中该概念对应的公式（如有）
-- **核心要点**：提取 2-3 个关键点
-- **代表工作**：添加当前论文
-- **相关概念**：链接笔记中其他相关概念
+使用 `references/concept-categories.md` 中的模板，**必须从论文中提取**以下信息填充：
 
-**禁止创建空的概念笔记**。每个新概念必须有实质内容。
+| 必填项 | 来源 | 说明 |
+|--------|------|------|
+| **定义** | Abstract/Introduction/Preliminary | 一句话定义，必须引用论文原文或转述 |
+| **数学形式** | 论文中的公式 | LaTeX 格式，含符号说明 |
+| **核心要点** | 从论文提取 | 2-3 个关键点，不能是空的 |
+| **代表工作** | 当前论文 | 必须添加当前论文 |
+| **相关概念** | 笔记中其他概念 | 使用 `[[Concept_Name]]` 格式 |
+
+**禁止事项**:
+- ❌ 禁止创建只有标题和空 section 的概念
+- ❌ 禁止使用通用描述代替论文特定内容
+- ❌ 禁止跳过任何必填项
+
+**每个新概念必须有实质内容，否则视为任务失败。**
 
 > 分类规则和模板见 `references/concept-categories.md`
 
