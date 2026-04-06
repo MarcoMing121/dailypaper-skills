@@ -780,7 +780,7 @@ Create concept note for {Concept_Name}.
 
 **Steps**:
 1. Read the QA skill at skills/paper-qa/SKILL.md
-2. Run QA script: python3 skills/paper-reader/qa_check.py {笔记路径}
+2. Run QA script: python3 skills/paper-qa/qa_check.py {笔记路径}
 3. Analyze the results
 4. Generate a human-readable report with:
    - Passed checks ✅

@@ -35,7 +35,7 @@ Step 3: 生成详细报告
 ## Step 1: 运行检查
 
 ```bash
-python3 skills/paper-reader/qa_check.py {笔记路径}
+python3 skills/paper-qa/qa_check.py {笔记路径}
 ```
 
 输出示例：
