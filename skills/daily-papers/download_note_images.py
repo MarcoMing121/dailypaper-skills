@@ -129,7 +129,8 @@ async def try_pdf_extract(arxiv_id: str, assets_dir: Path, method_name: str,
     async with sem:
         try:
             pdf_path = f"/tmp/arxiv_{arxiv_id}.pdf"
-            prefix = str(assets_dir / f"{method_name}_pdf_fig")
+            # Use a temp prefix for extraction
+            temp_prefix = str(assets_dir / "pdf_extract")
             # Download PDF if not cached
             if not Path(pdf_path).exists():
                 proc = await asyncio.create_subprocess_exec(
@@ -142,13 +143,13 @@ async def try_pdf_extract(arxiv_id: str, assets_dir: Path, method_name: str,
             # Extract images with pdfimages
             if Path(pdf_path).exists():
                 proc = await asyncio.create_subprocess_exec(
-                    "pdfimages", "-png", pdf_path, prefix,
+                    "pdfimages", "-png", pdf_path, temp_prefix,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 await asyncio.wait_for(proc.communicate(), timeout=30)
                 # Find extracted images > 10KB
-                extracted = sorted(assets_dir.glob(f"{method_name}_pdf_fig-*.png"))
+                extracted = sorted(assets_dir.glob("pdf_extract-*.png"))
                 large = [f for f in extracted if f.stat().st_size > 10240]
                 if fig_num - 1 < len(large):
                     return large[fig_num - 1]
@@ -168,6 +169,18 @@ def update_frontmatter(text: str) -> str:
     )
 
 
+def get_vault_path() -> Path:
+    """Get VAULT_PATH from config file."""
+    config_path = Path(__file__).parent.parent / "_shared" / "user-config.json"
+    if config_path.exists():
+        config = json.loads(config_path.read_text())
+        vault = config.get("paths", {}).get("obsidian_vault", "")
+        if vault:
+            return Path(vault).expanduser()
+    # Fallback: assume relative path from script location
+    return Path(__file__).parent.parent.parent.parent / "shared" / "ObsidianVault"
+
+
 async def process_note(note_path: Path) -> dict:
     """Main processing logic. Returns summary dict."""
     text = note_path.read_text(encoding="utf-8")
@@ -178,7 +191,9 @@ async def process_note(note_path: Path) -> dict:
         return {"total": 0, "reachable": 0, "localized": 0, "failed": 0}
 
     method_name = get_method_name(note_path)
-    assets_dir = note_path.parent / "assets"
+    # Use VAULT_PATH/assets/{method_name}/ as assets directory
+    vault_path = get_vault_path()
+    assets_dir = vault_path / "assets" / method_name
     sem = asyncio.Semaphore(CONCURRENCY)
 
     print(f"Found {len(images)} external image(s) in {note_path.name}")
@@ -201,8 +216,11 @@ async def process_note(note_path: Path) -> dict:
         ext = Path(img["url"]).suffix or ".png"
         if ext not in (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"):
             ext = ".png"
-        local_name = f"{method_name}_fig{fig_num}{ext}"
-        local_path = assets_dir / local_name
+        # File name without method prefix (directory name already includes it)
+        file_name = f"fig{fig_num}{ext}"
+        local_path = assets_dir / file_name
+        # Obsidian wikilink includes method_name/ prefix
+        obsidian_ref = f"{method_name}/{file_name}"
 
         # Ensure assets dir exists
         assets_dir.mkdir(parents=True, exist_ok=True)
@@ -223,10 +241,10 @@ async def process_note(note_path: Path) -> dict:
                     ok = True
 
         if ok and local_path.exists() and local_path.stat().st_size > 1024:
-            new_ref = f"![[{local_name}|600]]"
+            new_ref = f"![[{obsidian_ref}|600]]"
             replacements[img["full_match"]] = new_ref
             localized += 1
-            print(f"  [OK] Localized → {local_name}")
+            print(f"  [OK] Localized → {obsidian_ref}")
         else:
             failed += 1
             # Clean up partial download

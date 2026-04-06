@@ -75,7 +75,8 @@ metadata:
 - `VAULT_PATH`
 - `NOTES_PATH` = `{VAULT_PATH}/{paper_notes_folder}`
 - `CONCEPTS_PATH` = `{VAULT_PATH}/{concepts_folder}`
-- `ASSETS_PATH` = `{VAULT_PATH}/assets`
+- `ASSETS_ROOT` = `{VAULT_PATH}/assets`
+- `ASSETS_PATH` = `{VAULT_PATH}/assets/{method_name}` (每篇笔记独立的 assets 目录)
 - `TOPIC_MOC_PATH` = `{CONCEPTS_PATH}/MOCs`
 - `ZOTERO_DB`
 - `ZOTERO_STORAGE`
@@ -84,6 +85,24 @@ metadata:
 - `GIT_PUSH_ENABLED`
 
 其中 `GIT_PUSH_ENABLED` 只有在 `GIT_COMMIT_ENABLED=true` 时才可能为真。
+
+**⚠️ ASSETS_PATH 说明**：
+
+每篇笔记有独立的 assets 目录，结构如下：
+```
+VAULT_PATH/
+├── Papers/
+│   └── 2-VLA/
+│       └── Pi05.md          ← 笔记文件
+└── assets/
+    └── Pi05/                ← 该笔记的 assets 目录
+        ├── fig1.png
+        └── fig2.png
+```
+
+**图片引用格式**：
+- 在笔记中使用 Obsidian wikilink：`![[Pi05/fig1.png]]`
+- 注意包含方法名前缀，确保路径正确
 
 后续统一使用上面的变量。
 
@@ -363,7 +382,7 @@ grep -E '<img.*src=' /tmp/paper_${ARXIV_ID}.html | \
 
 ### 流程（严格按顺序执行）
 
-**Step 1: arXiv HTML（首选）**
+**Step 1: arXiv HTML（首选，唯一推荐）**
 ```bash
 # 1. 检查官方 HTML
 curl -sI "https://arxiv.org/html/{arxiv_id}" | head -1
@@ -371,46 +390,33 @@ curl -sI "https://arxiv.org/html/{arxiv_id}" | head -1
 # 如果返回 200，提取图片
 curl -sL "https://arxiv.org/html/{arxiv_id}" | grep -E '<figure|<img.*src='
 
-# 如果返回 404，检查镜像站！
-curl -sI "https://ar5iv.org/html/{arxiv_id}" | head -1
+# 图片 URL 格式
+# https://arxiv.org/html/2603.19312v2/x1.png
 ```
 
-**⚠️ 重要：镜像站 (ar5iv)**
+**⚠️ 禁止使用 ar5iv**
 
-**ar5iv.org 是 arXiv 的官方 HTML 镜像，比 arxiv.org/html 更可靠！**
-
-| 站点 | 类型 | 可靠性 | URL 格式 |
-|------|------|--------|----------|
-| **arxiv.org/html** | 官方 HTML | 可能 404 | `https://arxiv.org/html/{arxiv_id}` |
-| **ar5iv.org** | 镜像站 | ✅ 高 | `https://ar5iv.org/html/{arxiv_id}` |
-| **ar5iv.labs.arxiv.org** | 实验室版 | ✅ 高 | `https://ar5iv.labs.arxiv.org/html/{arxiv_id}` |
-
-**检查顺序**：
-```
-1. arxiv.org/html (官方)
-   ├─ 200 → 用外链
-   └─ 404 → 检查镜像站
-   
-2. ar5iv.org (镜像站) ← 必须检查！
-   ├─ 200 → 用外链
-   └─ 404 → 检查实验室版本
-   
-3. ar5iv.labs.arxiv.org
-   ├─ 200 → 用外链
-   └─ 404 → 检查项目主页
-```
+| 站点 | 状态 | 说明 |
+|------|------|------|
+| **arxiv.org/html** | ✅ 首选 | 官方 HTML，最可靠 |
+| **ar5iv.org** | ❌ 禁止 | 可能返回空白图片 |
+| **ar5iv.labs.arxiv.org** | ❌ 禁止 | 同上 |
 
 **图片 URL 格式**：
 ```
-官方：https://arxiv.org/html/2303.11165/assets/x1.png
-镜像：https://ar5iv.labs.arxiv.org/html/2303.11165/assets/x1.png
+✅ 正确：https://arxiv.org/html/2603.19312v2/x1.png
+❌ 错误：https://ar5iv.labs.arxiv.org/html/2603.07648/assets/x1.png
 ```
 
 **验证图片可达性**：
 ```bash
-curl -sI "https://ar5iv.labs.arxiv.org/html/2303.11165/assets/x1.png" | head -1
+curl -sI "https://arxiv.org/html/2603.19312v2/x1.png" | head -1
 # 返回 HTTP/2 200 表示可达
 ```
+
+**如果 arxiv.org/html 404 或图片不全**：
+1. 查找项目主页（GitHub Pages 等）
+2. 最后才考虑本地 PDF 提取
 
 **Step 2: 项目主页（HTML 404 或图片不全时）**
 ```bash
@@ -431,6 +437,7 @@ pdfimages -png paper.pdf output_prefix
 
 ### ⚠️ 禁止事项
 
+- ❌ **禁止使用 ar5iv 链接**（可能返回空白图片）
 - ❌ **禁止直接跳到 PDF 提取**（必须先尝试 arXiv HTML）
 - ❌ **禁止下载所有图片**（只下载不可达的）
 - ❌ **禁止跳过可达性检查**（必须运行 download_note_images.py）
@@ -443,10 +450,49 @@ pdfimages -png paper.pdf output_prefix
 python3 ../daily-papers/download_note_images.py "{笔记完整路径}"
 ```
 
-- 可达的外链保持不动，不可达的自动下载到 `assets/` 并替换为 Obsidian wikilink
+- 可达的外链保持不动，不可达的自动下载到 `assets/{method_name}/` 并替换为 Obsidian wikilink
 - 如有本地化操作，frontmatter `image_source` 自动更新为 `mixed`
 
 **这就是为什么外链优先**：脚本会自动处理不可达的图片，我们不需要预先下载所有图片。
+
+### ⚠️ 图片引用格式规范（CRITICAL）
+
+**创建笔记时**：
+
+| 格式 | 示例 | 使用场景 |
+|------|------|----------|
+| **Markdown 外链** | `![](https://arxiv.org/html/xxx/assets/x1.png)` | ✅ **首选**，创建笔记时使用 |
+| **Obsidian wikilink** | `![[Pi05/fig1.png\|600]]` | ⚠️ 仅由 script 自动生成 |
+
+**为什么必须用 Markdown 外链格式？**
+1. `download_note_images.py` 只识别 `![](https://...)` 格式
+2. 外链格式允许 script 检查可达性
+3. 不可达的会自动转换为 Obsidian wikilink
+
+**Script 自动转换流程**：
+```
+笔记中的外链                          Script 处理后
+─────────────────────────────────────────────────────────────
+![](https://arxiv.org/.../x1.png)  →  ![[Pi05/fig1.png|600]]  (不可达)
+![](https://arxiv.org/.../x2.png)  →  保持不变               (可达)
+```
+
+**最终 assets 结构**：
+```
+VAULT_PATH/
+├── Papers/
+│   └── 2-VLA/
+│       └── Pi05.md               ← 笔记
+└── assets/
+    └── Pi05/                     ← 该笔记的 assets
+        ├── fig1.png              ← 从外链下载
+        └── fig2.png
+```
+
+**禁止事项**：
+- ❌ 禁止在创建笔记时使用 Obsidian wikilink（script 无法识别）
+- ❌ 禁止使用相对路径（必须是完整 URL）
+- ❌ 禁止手动下载图片到 assets 目录（由 script 自动处理）
 
 ### 公式格式
 
@@ -692,14 +738,120 @@ Create concept note for {Concept_Name}.
 - [ ] 笔记中所有 `[[概念]]` 链接的概念笔记都存在？
 - [ ] 概念笔记包含本论文作为"代表工作"？
 
-## 6. 完成后自检（合并 checklist）
+## 6. 完成后自动 QA（CRITICAL - 必须执行）
 
-- [ ] 所有 Figure 都在笔记中（数量与论文一致）？
-- [ ] 所有公式都在笔记中（变量一致、无冲突）？
-- [ ] 所有 Table 完整保留（所有行列）？
-- [ ] 正文中技术术语有 `[[概念]]` 内联链接？
-- [ ] 概念库已更新（缺失的概念已创建）？
-- [ ] 图片可用（外链可加载 / 本地 >10KB）？
+### ⚠️ 自动 QA 流程
+
+**笔记创建完成后，必须启动 QA subagent 进行自动检查和修复！**
+
+### 流程
+
+```
+创建笔记
+    ↓
+启动 QA subagent (sessions_spawn)
+    ↓
+┌─────────────────────────────────┐
+│  QA Subagent (LLM + 脚本):       │
+│  1. 运行检查脚本                  │
+│  2. 分析问题                      │
+│  3. 自动修复所有问题               │
+│     ├─ Frontmatter → 补全字段     │
+│     ├─ 图片不可达 → 下载图片       │
+│     ├─ 公式格式 → 修正 LaTeX      │
+│     ├─ 概念缺失 → 创建概念笔记     │
+│     └─ 内容遗漏 → 补充内容         │
+│  4. 重新检查验证                   │
+│  5. 循环直到通过（最多 3 轮）      │
+└─────────────────────────────────┘
+    ↓
+返回 QA 报告
+```
+
+### 启动 QA Subagent
+
+**使用 `sessions_spawn` 启动 QA subagent，它会运行检查并生成报告：**
+
+```xml
+<sessions_spawn runtime="subagent" mode="run"
+  task="Run QA check on paper note and generate report.
+
+**Skill to use**: skills/paper-qa/SKILL.md
+
+**Steps**:
+1. Read the QA skill at skills/paper-qa/SKILL.md
+2. Run QA script: python3 skills/paper-reader/qa_check.py {笔记路径}
+3. Analyze the results
+4. Generate a human-readable report with:
+   - Passed checks ✅
+   - Failed checks ❌ (with specific issues)
+   - Recommended actions
+
+**Output**: Return the QA report in human-readable format.
+
+**Note**: DO NOT auto-fix. Just report issues for user to decide."
+  label="qa-{method_name}" />
+```
+
+### QA 检查项目
+
+| 检查项 | 说明 | 结果示例 |
+|--------|------|----------|
+| **structure** | 文件命名、路径 | ✅ PASS |
+| **frontmatter** | 必需字段完整性 | ✅ PASS |
+| **save_path** | 保存路径分类 | ✅ PASS (category: 2-VLA) |
+| **git_status** | Git 状态 | ✅ PASS |
+| **content_stats** | Figure/Table/公式数量统计 | ✅ PASS (figures: 3, tables: 27) |
+| **concepts** | 概念链接有效性 | ❌ FAIL (Missing: RLOO, Pass_at_k) |
+| **figures** | 图片格式、可达性、大小 | ✅ PASS |
+| **formulas** | LaTeX 兼容性 | ✅ PASS |
+| **formula_format** | $$ 块前后空行 | ✅ PASS |
+| **formula_naming** | 公式命名 | ❌ FAIL (Formula 4, 5 missing names) |
+| **symbol_explanation** | 符号说明 | ❌ FAIL (12 formulas missing symbols) |
+| **concept_content** | 概念内容质量 | ❌ FAIL (1 concept too short) |
+| **representative_work** | 代表工作 | ✅ PASS |
+
+### QA 报告示例
+
+```
+============================================================
+QA Report: Papers/4-RL-Theory/MaxRL.md
+Final Status: FAILED
+============================================================
+
+✅ PASSED CHECKS:
+  Structure, Frontmatter, Save_path, Git_status,
+  Content_stats, Figures, Formulas, Formula_format,
+  Representative_work
+
+❌ FAILED CHECKS:
+  Concepts: Missing 3 concept files
+    - RLOO
+    - Pass_at_k_Optimization
+    - Maximum_Likelihood_Estimation
+
+  Formula_naming: 2 formulas missing names
+    - Formula 4
+    - Formula 5
+
+  Symbol_explanation: 12 formulas missing symbol lists
+
+📌 RECOMMENDED ACTIONS:
+  1. Create 3 missing concept notes
+  2. Add names to formulas 4 and 5
+  3. Add symbol explanations to 12 formulas
+```
+
+### 用户看到报告后
+
+- 可以手动修复问题
+- 或让 agent 帮助修复特定问题
+- 完全透明，用户掌控
+
+### 自检清单（QA 通过后确认）
+
+- [ ] QA 检查全部通过？
+- [ ] 如果有失败项，是否已修复？
 
 ## 7. 交互式功能
 
@@ -713,6 +865,5 @@ Create concept note for {Concept_Name}.
 ## 参考文件（按需查阅）
 
 - **`references/zotero-guide.md`** — Zotero 查询、分类、PDF 路径获取、智能分类判断
-- **`references/image-troubleshooting.md`** — ar5iv 图片编号对应、PDF 提取备选
 - **`references/concept-categories.md`** — 概念自动归类的 16 个子目录规则 + 模板
 - **`references/quality-standards.md`** — 公式/图片/表格的详细质量规范 + 自检清单
