@@ -367,6 +367,7 @@ grep -E '<img.*src=' /tmp/paper_${ARXIV_ID}.html | \
 **自检清单（每篇论文必须确认）**：
 - [ ] 已统计论文 Figure 总数？
 - [ ] 已从 arXiv HTML 提取所有 `<figure>`？
+- [ ] **已识别组合图并包含所有子图？**（CRITICAL）
 - [ ] 图片数量与论文一致？
 - [ ] 已运行 `download_note_images.py` 检查可达性？
 - [ ] 笔记中每个 Figure 都有对应的图片？
@@ -393,6 +394,57 @@ curl -sL "https://arxiv.org/html/{arxiv_id}" | grep -E '<figure|<img.*src='
 # 图片 URL 格式
 # https://arxiv.org/html/2603.19312v2/x1.png
 ```
+
+**⚠️ 组合图检测（CRITICAL - 必须检查）**
+
+> **问题**：arXiv 的 `xN.png` 编号与论文 Figure 编号**不一定一致**！
+> 
+> **示例**：LeWM 论文
+> - Figure 3 是组合图 → 包含 x3.png, x4.png, x5.png
+> - Figure 6 是组合图 → 包含 x8.png, x9.png, x10.png, x11.png
+> - 如果笔记只用 x8.png，就漏掉了 x9-x11
+
+**检测方法**：
+
+```bash
+# 解析 HTML 中的 figure 嵌套结构
+curl -sL "https://arxiv.org/html/{arxiv_id}" | grep -E '<figure|</figure>|<img' > /tmp/figures.txt
+
+# 识别组合图（一个 <figure> 内有多个 <img>）
+# 示例输出：
+# <figure id="S4.F6">
+#   <figure id="S4.F6.1"><img src="x8.png">
+#   <figure id="S4.F6.2"><img src="x9.png">
+#   <figure id="S4.F6.3"><img src="x10.png">
+#   <figure id="S4.F6.4"><img src="x11.png">
+# </figure>
+```
+
+**处理规则**：
+
+| Figure 类型 | 示例 | 笔记处理 |
+|-------------|------|----------|
+| **单图** | Figure 1 → x1.png | 插入一张图片 |
+| **组合图** | Figure 6 → x8-x11.png | **必须插入所有子图** |
+
+**组合图笔记格式**：
+
+```markdown
+### Figure 6: Planning Performance across Environments
+
+![](https://arxiv.org/html/2603.19312v2/x8.png)
+![](https://arxiv.org/html/2603.19312v2/x9.png)
+![](https://arxiv.org/html/2603.19312v2/x10.png)
+![](https://arxiv.org/html/2603.19312v2/x11.png)
+
+**说明**: 不同环境下的规划性能对比。LeWM 在 PushT、OGBench-Cube、Two-Room、Reacher 均表现优异。
+```
+
+**自检清单（组合图）**：
+- [ ] 已解析 HTML 中的 `<figure>` 嵌套结构？
+- [ ] 已识别所有组合图（多子图的 Figure）？
+- [ ] 每个组合图的所有子图都插入到笔记中？
+- [ ] 图片数量与论文 Figure 数量一致？
 
 **⚠️ 禁止使用 ar5iv**
 
