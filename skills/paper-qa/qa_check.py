@@ -21,8 +21,11 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Optional
+from html.parser import HTMLParser
 
 
 # ============================================================================
@@ -343,6 +346,201 @@ def extract_images_for_caption_check(text: str) -> list[dict]:
         })
     
     return images
+
+
+class ArxivFigureParser(HTMLParser):
+    """Parse arXiv HTML to extract figure structure."""
+    
+    def __init__(self):
+        super().__init__()
+        self.figures = []  # List of {figure_id, images: [img_src, ...]}
+        self.current_figure = None
+        self.current_nested_figure = None
+        self.in_figure = False
+        self.depth = 0
+    
+    def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
+        
+        if tag == "figure":
+            self.depth += 1
+            figure_id = attrs_dict.get("id", "")
+            
+            if self.depth == 1:
+                # Top-level figure
+                self.current_figure = {
+                    "id": figure_id,
+                    "images": []
+                }
+                self.in_figure = True
+            elif self.depth == 2 and self.current_figure:
+                # Nested figure (sub-figure within a composite)
+                pass
+        
+        elif tag == "img" and self.current_figure:
+            src = attrs_dict.get("src", "")
+            if src:
+                self.current_figure["images"].append(src)
+    
+    def handle_endtag(self, tag):
+        if tag == "figure":
+            if self.depth == 1 and self.current_figure:
+                # Save completed top-level figure
+                self.figures.append(self.current_figure)
+                self.current_figure = None
+                self.in_figure = False
+            self.depth -= 1
+
+
+def fetch_arxiv_html(arxiv_url: str) -> Optional[str]:
+    """Fetch arXiv HTML content."""
+    try:
+        # Normalize URL
+        if "arxiv.org/abs/" in arxiv_url:
+            arxiv_id = arxiv_url.split("/abs/")[-1].split("v")[0]
+            html_url = f"https://arxiv.org/html/{arxiv_id}"
+        elif "arxiv.org/html/" in arxiv_url:
+            html_url = arxiv_url
+        else:
+            return None
+        
+        req = urllib.request.Request(
+            html_url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; PaperQA/1.0)"}
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.read().decode("utf-8")
+    except Exception as e:
+        return None
+
+
+def parse_arxiv_figures(html_content: str) -> list[dict]:
+    """Parse arXiv HTML to extract figure structure."""
+    parser = ArxivFigureParser()
+    parser.feed(html_content)
+    return parser.figures
+
+
+def extract_arxiv_html_url(text: str) -> Optional[str]:
+    """Extract arxiv_html URL from frontmatter."""
+    # Check frontmatter first
+    fm_match = re.match(r'^---\n(.*?)\n---', text, re.DOTALL)
+    if fm_match:
+        fm_text = fm_match.group(1)
+        # Look for arxiv_html field
+        arxiv_match = re.search(r'^arxiv_html:\s*(.+)$', fm_text, re.MULTILINE)
+        if arxiv_match:
+            return arxiv_match.group(1).strip().strip('"\'')
+    
+    # Also check for arxiv.org links in the document
+    arxiv_links = re.findall(r'https?://arxiv\.org/(abs|html)/([0-9.]+)', text)
+    if arxiv_links:
+        arxiv_id = arxiv_links[0][1]
+        return f"https://arxiv.org/html/{arxiv_id}"
+    
+    return None
+
+
+def check_figure_mapping(text: str) -> dict:
+    """Check if note images match arXiv HTML figure structure.
+    
+    Detects:
+    - Composite figures (one figure with multiple images)
+    - Missing sub-images
+    - Wrong image-to-figure mapping
+    """
+    issues = []
+    warnings = []
+    stats = {"note_images": 0, "paper_figures": 0, "composite_figures": 0}
+    
+    # Extract arxiv_html URL
+    arxiv_url = extract_arxiv_html_url(text)
+    if not arxiv_url:
+        return {
+            "ok": True,
+            "issues": [],
+            "warnings": ["No arxiv_html URL found, skipping figure mapping check"],
+            "stats": stats,
+            "skipped": True
+        }
+    
+    # Fetch arXiv HTML
+    html_content = fetch_arxiv_html(arxiv_url)
+    if not html_content:
+        return {
+            "ok": True,
+            "issues": [],
+            "warnings": [f"Could not fetch arXiv HTML: {arxiv_url}"],
+            "stats": stats,
+            "skipped": True
+        }
+    
+    # Parse figure structure
+    paper_figures = parse_arxiv_figures(html_content)
+    stats["paper_figures"] = len(paper_figures)
+    
+    # Identify composite figures (figures with multiple images)
+    composite_figures = [f for f in paper_figures if len(f["images"]) > 1]
+    stats["composite_figures"] = len(composite_figures)
+    
+    # Extract images from note
+    note_images = []
+    for match in re.finditer(r'!\[([^\]]*)\]\((https?://[^)]+)\)', text):
+        url = match.group(2)
+        # Extract xN.png from URL
+        img_match = re.search(r'/([xX][0-9]+\.png)', url)
+        if img_match:
+            note_images.append(img_match.group(1).lower())
+    
+    for match in re.finditer(r'!\[\[([^\]|]+)\]\]', text):
+        ref = match.group(1)
+        img_match = re.search(r'([xX][0-9]+\.png)', ref)
+        if img_match:
+            note_images.append(img_match.group(1).lower())
+    
+    stats["note_images"] = len(note_images)
+    
+    # Check for composite figures missing sub-images
+    for fig in composite_figures:
+        fig_id = fig["id"]
+        fig_images = [os.path.basename(img).lower() for img in fig["images"]]
+        
+        # Check which images from this composite figure are in the note
+        found_images = [img for img in fig_images if img in note_images]
+        missing_images = [img for img in fig_images if img not in note_images]
+        
+        if found_images and missing_images:
+            issues.append(
+                f"Composite Figure {fig_id}: Found {len(found_images)}/{len(fig_images)} images. "
+                f"Missing: {', '.join(missing_images)}"
+            )
+        elif len(found_images) == 1 and len(fig_images) > 1:
+            warnings.append(
+                f"Composite Figure {fig_id}: Only 1 of {len(fig_images)} images included. "
+                f"Consider including all sub-images: {', '.join(fig_images)}"
+            )
+    
+    # Check if note has more images than expected (potential duplicates)
+    all_paper_images = []
+    for fig in paper_figures:
+        for img in fig["images"]:
+            all_paper_images.append(os.path.basename(img).lower())
+    
+    extra_images = [img for img in note_images if img not in all_paper_images]
+    if extra_images:
+        warnings.append(f"Images in note not found in paper: {', '.join(extra_images)}")
+    
+    return {
+        "ok": len(issues) == 0,
+        "issues": issues,
+        "warnings": warnings,
+        "stats": stats,
+        "composite_figures": [
+            {"id": f["id"], "images": [os.path.basename(img) for img in f["images"]]}
+            for f in composite_figures
+        ]
+    }
 
 
 def check_tables(text: str) -> dict:
@@ -695,6 +893,7 @@ async def run_qa(note_path: Path) -> dict:
         
         # 图片质量检查
         "figures": check_figures(text, method_name, vault_path),
+        "figure_mapping": check_figure_mapping(text),
         
         # 公式质量检查
         "formulas": check_formulas(text),
@@ -752,6 +951,23 @@ def print_report(results: dict):
                 print(f"    - {issue}")
             if "stats" in result:
                 print(f"    Stats: {result['stats']}")
+            if "warnings" in result and result["warnings"]:
+                print(f"    Warnings:")
+                for warning in result["warnings"]:
+                    print(f"      ⚠️ {warning}")
+        print()
+    
+    # Print warnings for passed checks
+    warnings_to_show = []
+    for check_name, check_result in results["checks"].items():
+        if check_result.get("warnings"):
+            for warning in check_result["warnings"]:
+                warnings_to_show.append((check_name, warning))
+    
+    if warnings_to_show:
+        print("⚠️ WARNINGS:")
+        for name, warning in warnings_to_show:
+            print(f"  • [{name}] {warning}")
         print()
     
     # Print recommended actions
@@ -768,6 +984,16 @@ def print_report(results: dict):
                         if concepts:
                             print(f"  {action_num}. Create missing concept notes: {concepts}")
                             action_num += 1
+            
+            elif name == "figure_mapping":
+                # Composite figure issues
+                for issue in result["issues"]:
+                    if "Composite Figure" in issue:
+                        print(f"  {action_num}. Fix image mapping: {issue}")
+                        action_num += 1
+                    else:
+                        print(f"  {action_num}. Fix: {issue}")
+                        action_num += 1
             
             elif name == "formula_naming":
                 # Missing formula names
