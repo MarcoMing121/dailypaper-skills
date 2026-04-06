@@ -134,9 +134,21 @@ Final Status: FAILED
 - [x] 本地图片存在
 - [x] 图片大小 > 1KB
 - [x] 图片描述提取（供用户参考）
-- [x] **图片映射验证**: LLM 分析图片 URL 与 Figure 标题是否匹配
+- [x] **图片映射验证**: 检测组合图完整性（使用 `_shared/check_composite_figures.py`）
 
-### 图片映射检查（LLM 分析）
+### 图片映射检查（自动检测）
+
+**检测逻辑**：使用共享脚本 `../_shared/check_composite_figures.py`
+
+1. 从笔记 frontmatter 提取 `arxiv_html` URL
+2. 抓取 arXiv HTML 并解析 `<figure>` 嵌套结构
+3. 识别组合图（一个 Figure 包含多张图片）
+4. 对比笔记中的图片与论文中的图片
+
+**检测示例**：
+```
+❌ Composite Figure S4.F6: Found 1/4 images. Missing: x9.png, x10.png, x11.png
+```
 
 脚本提取所有图片及其描述，LLM 需要检查：
 

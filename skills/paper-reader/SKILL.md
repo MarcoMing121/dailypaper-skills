@@ -407,17 +407,13 @@ curl -sL "https://arxiv.org/html/{arxiv_id}" | grep -E '<figure|<img.*src='
 **检测方法**：
 
 ```bash
-# 解析 HTML 中的 figure 嵌套结构
-curl -sL "https://arxiv.org/html/{arxiv_id}" | grep -E '<figure|</figure>|<img' > /tmp/figures.txt
+# 运行共享脚本检测组合图
+python3 ../_shared/check_composite_figures.py {arxiv_id}
 
-# 识别组合图（一个 <figure> 内有多个 <img>）
 # 示例输出：
-# <figure id="S4.F6">
-#   <figure id="S4.F6.1"><img src="x8.png">
-#   <figure id="S4.F6.2"><img src="x9.png">
-#   <figure id="S4.F6.3"><img src="x10.png">
-#   <figure id="S4.F6.4"><img src="x11.png">
-# </figure>
+# ⚠️ COMPOSITE FIGURES (must include ALL sub-images):
+#   Figure S4.F6:
+#     Images: x8.png, x9.png, x10.png, x11.png
 ```
 
 **处理规则**：

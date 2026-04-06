@@ -25,7 +25,81 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Optional
-from html.parser import HTMLParser
+
+# Import shared composite figure parser
+try:
+    from _shared.check_composite_figures import ArxivFigureParser, fetch_arxiv_html, parse_arxiv_figures
+    SHARED_PARSER_AVAILABLE = True
+except ImportError:
+    SHARED_PARSER_AVAILABLE = False
+    # Fallback: define locally if shared not available
+    from html.parser import HTMLParser
+    
+    class ArxivFigureParser(HTMLParser):
+        """Parse arXiv HTML to extract figure structure."""
+        
+        def __init__(self):
+            super().__init__()
+            self.figures = []
+            self.current_figure = None
+            self.in_figure = False
+            self.depth = 0
+        
+        def handle_starttag(self, tag, attrs):
+            attrs_dict = dict(attrs)
+            
+            if tag == "figure":
+                self.depth += 1
+                figure_id = attrs_dict.get("id", "")
+                
+                if self.depth == 1:
+                    self.current_figure = {
+                        "id": figure_id,
+                        "images": []
+                    }
+                    self.in_figure = True
+            
+            elif tag == "img" and self.current_figure:
+                src = attrs_dict.get("src", "")
+                if src:
+                    self.current_figure["images"].append(src)
+        
+        def handle_endtag(self, tag):
+            if tag == "figure":
+                if self.depth == 1 and self.current_figure:
+                    self.figures.append(self.current_figure)
+                    self.current_figure = None
+                    self.in_figure = False
+                self.depth -= 1
+
+
+    def fetch_arxiv_html(arxiv_url: str) -> Optional[str]:
+        """Fetch arXiv HTML content."""
+        try:
+            if "arxiv.org/abs/" in arxiv_url:
+                arxiv_id = arxiv_url.split("/abs/")[-1].split("v")[0]
+                html_url = f"https://arxiv.org/html/{arxiv_id}"
+            elif "arxiv.org/html/" in arxiv_url:
+                html_url = arxiv_url
+            else:
+                return None
+            
+            req = urllib.request.Request(
+                html_url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; PaperQA/1.0)"}
+            )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return response.read().decode("utf-8")
+        except Exception as e:
+            return None
+
+
+    def parse_arxiv_figures(html_content: str) -> list[dict]:
+        """Parse arXiv HTML to extract figure structure."""
+        parser = ArxivFigureParser()
+        parser.feed(html_content)
+        return parser.figures
 
 
 # ============================================================================
@@ -264,12 +338,6 @@ def check_formula_meaning(text: str) -> dict:
         "issues": issues,
         "stats": {"total": len(pattern.findall(text))}
     }
-    
-    return {
-        "ok": len(issues) == 0,
-        "issues": issues,
-        "stats": {"total": len(pattern.findall(text))}
-    }
 
 
 def check_concept_links(text: str, vault_path: Path) -> dict:
@@ -346,80 +414,6 @@ def extract_images_for_caption_check(text: str) -> list[dict]:
         })
     
     return images
-
-
-class ArxivFigureParser(HTMLParser):
-    """Parse arXiv HTML to extract figure structure."""
-    
-    def __init__(self):
-        super().__init__()
-        self.figures = []  # List of {figure_id, images: [img_src, ...]}
-        self.current_figure = None
-        self.current_nested_figure = None
-        self.in_figure = False
-        self.depth = 0
-    
-    def handle_starttag(self, tag, attrs):
-        attrs_dict = dict(attrs)
-        
-        if tag == "figure":
-            self.depth += 1
-            figure_id = attrs_dict.get("id", "")
-            
-            if self.depth == 1:
-                # Top-level figure
-                self.current_figure = {
-                    "id": figure_id,
-                    "images": []
-                }
-                self.in_figure = True
-            elif self.depth == 2 and self.current_figure:
-                # Nested figure (sub-figure within a composite)
-                pass
-        
-        elif tag == "img" and self.current_figure:
-            src = attrs_dict.get("src", "")
-            if src:
-                self.current_figure["images"].append(src)
-    
-    def handle_endtag(self, tag):
-        if tag == "figure":
-            if self.depth == 1 and self.current_figure:
-                # Save completed top-level figure
-                self.figures.append(self.current_figure)
-                self.current_figure = None
-                self.in_figure = False
-            self.depth -= 1
-
-
-def fetch_arxiv_html(arxiv_url: str) -> Optional[str]:
-    """Fetch arXiv HTML content."""
-    try:
-        # Normalize URL
-        if "arxiv.org/abs/" in arxiv_url:
-            arxiv_id = arxiv_url.split("/abs/")[-1].split("v")[0]
-            html_url = f"https://arxiv.org/html/{arxiv_id}"
-        elif "arxiv.org/html/" in arxiv_url:
-            html_url = arxiv_url
-        else:
-            return None
-        
-        req = urllib.request.Request(
-            html_url,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; PaperQA/1.0)"}
-        )
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return response.read().decode("utf-8")
-    except Exception as e:
-        return None
-
-
-def parse_arxiv_figures(html_content: str) -> list[dict]:
-    """Parse arXiv HTML to extract figure structure."""
-    parser = ArxivFigureParser()
-    parser.feed(html_content)
-    return parser.figures
 
 
 def extract_arxiv_html_url(text: str) -> Optional[str]:
