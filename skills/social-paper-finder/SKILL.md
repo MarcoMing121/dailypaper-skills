@@ -80,11 +80,20 @@ note_id=$(grep -oP '"noteId":"[^"]*"' /tmp/xhs.html | head -1 | sed 's/"noteId":
 curl -s "$img_url" -o "/root/.openclaw/workspaces/paper-agent/.cache/social-images/${note_id}.jpg"
 ```
 
-### 1.7 读取图片内容
+### 1.7 图片处理（⚠️ 关键：不要 read 图片！）
 
-使用 `read` 工具读取下载的图片，查看内容：
-```bash
-read /root/.openclaw/workspaces/paper-agent/.cache/social-images/${note_id}.jpg
+**❌ 不要用 `read` 工具读取图片！** 图片 base64 会占用大量上下文（每张 100-270KB），导致 context overflow。
+
+图片的作用仅是 **供用户参考的视觉证据**，agent 不需要"看"图片来提取论文信息——这些信息已从 HTML 正文中提取。
+
+**正确做法：**
+- 下载图片到 `.cache/` 目录（供将来参考）
+- 只在输出中记录图片路径（不读取、不发送）
+- 如果 HTML 提取失败（正文为空），使用 **OCR 或视觉模型 subagent** 单独处理，结果以文本形式返回主 session
+
+```
+✅ 正确：下载图片 → 记录路径 → 不读取
+❌ 错误：下载图片 → read 图片 → base64 进入上下文
 ```
 
 ### 小红书可提取内容
@@ -231,18 +240,34 @@ paper-reader 会在生成的 Obsidian 笔记中添加「发现来源」section�
 执行流程：
 1. curl 下载页面
 2. 正则提取标题、正文、作者、点赞数
-3. 下载图片到 `.cache/social-images/`
-4. read 查看图片内容
-5. 识别论文 arXiv ID
-6. 调用 paper-reader 阅读论文
-7. 生成 Obsidian 笔记（含来源信息）
+3. 下载图片到 `.cache/social-images/`（仅存档，不读取）
+4. 识别论文 arXiv ID
+5. 调用 paper-reader 阅读论文
+6. 生成 Obsidian 笔记（含来源信息）
 
-## 注意事项
+## ⚠️ 关键注意事项
 
-1. **内容可信度**：始终提醒用户社交平台内容是二手解读
-2. **图片仅供 AI 查看**：图片存放在 `.cache/` 目录，不发送给用户
-3. **评论暂不支持**：小红书评论是 JS 动态加载，curl 无法获取
-4. **隐私保护**：不记录用户的社交平台登录信息
+### 1. 图片处理原则
+
+**绝对不要 `read` 图片文件！**
+
+| 做法 | 后果 | 是否正确 |
+|------|------|----------|
+| `read` 图片 | base64 进入上下文，单张 100-270KB | ❌ |
+| 下载 + 记录路径 | 图片存在 `.cache/`，不占上下文 | ✅ |
+| 用 OCR subagent 提取 | 文本结果返回，图片不进上下文 | ✅ |
+
+**为什么？**
+- 小红书截图每张 ~150-250KB（解码后）
+- Base64 编码后增长 ~33%
+- 3 张图片 = 567KB base64 ≈ **141K tokens**（占满 200K 上下文的 70%！）
+
+### 2. 其他注意事项
+
+- **内容可信度**：始终提醒用户社交平台内容是二手解读
+- **图片仅供存档**：图片存放在 `.cache/` 目录，需要时让用户自己查看
+- **评论暂不支持**：小红书评论是 JS 动态加载，curl 无法获取
+- **隐私保护**：不记录用户的社交平台登录信息
 
 ## 与 paper-reader 的协作
 
