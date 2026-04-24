@@ -410,6 +410,142 @@ mineru-open-api extract /tmp/paper_${ARXIV_ID}.pdf -o /tmp/paper_mineru_${ARXIV_
 - **OCR 支持**：80+ 语言
 - **内容完整**：不会遗漏任何 Figure
 
+### ⚠️ 1.6 MinerU Markdown 分块提取（CRITICAL - 防止 Context Overflow）
+
+> **更新 (2026-04-25)**：MinerU 输出的 Markdown 可能很大（89KB / 805 行），直接 `read` 全部内容会导致 context overflow。
+
+#### 问题
+
+| 场景 | 文件大小 | Token 估算 | 后果 |
+|------|----------|-----------|------|
+| 小论文 | <200 行 / <30KB | ~7-8K | ✅ 安全 |
+| 中论文 | 200-500 行 / 30-60KB | ~8-15K | ⚠️ 需注意 |
+| **大论文** | **>500 行 / >60KB** | **>15K** | **🚨 必须分块** |
+
+**MEDS 论文案例**：MinerU 输出 89KB / 805 行，直接 read 导致 context overflow + 模型拒绝响应。
+
+#### 判断规则
+
+```bash
+MINERU_MD="/tmp/paper_mineru_${ARXIV_ID}/paper_${ARXIV_ID}.md"
+LINES=$(wc -l < "$MINERU_MD")
+SIZE=$(wc -c < "$MINERU_MD")
+
+echo "MinerU output: $LINES lines, $SIZE bytes"
+
+if [ $LINES -gt 500 ] || [ $SIZE -gt 60000 ]; then
+  echo "NEEDS CHUNKING"
+else
+  echo "SAFE TO READ DIRECTLY"
+fi
+```
+
+#### 分块方案：并行 Subagent 提取
+
+**与 arXiv HTML 分块逻辑一致，但针对 MinerU Markdown 格式调整**。
+
+**流程图**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Main Session                                                │
+│  1. MinerU 提取完成 → 检查 md 行数/大小                       │
+│  2. 如果 > 500行 或 > 60KB，分割成 chunks                     │
+│  3. 并行 spawn subagents                                     │
+│     ├─ Subagent 1 (chunk 1) ──┐                             │
+│     ├─ Subagent 2 (chunk 2) ──┼──→ 返回结构化 JSON           │
+│     └─ Subagent N (chunk N) ──┘                             │
+│  4. 汇总所有 JSON 结果                                        │
+│  5. 生成完整笔记                                              │
+│                                                              │
+│  同时：主 session 处理图片（复制到 ASSETS_PATH）               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Step 1: 分割 Markdown**
+
+```bash
+MINERU_MD="/tmp/paper_mineru_${ARXIV_ID}/paper_${ARXIV_ID}.md"
+CHUNK_SIZE=300
+LINES=$(wc -l < "$MINERU_MD")
+NUM_CHUNKS=$(( ($LINES + $CHUNK_SIZE - 1) / $CHUNK_SIZE ))
+
+for i in $(seq 1 $NUM_CHUNKS); do
+  START=$(( ($i - 1) * $CHUNK_SIZE + 1 ))
+  END=$(( $i * $CHUNK_SIZE ))
+  [ $END -gt $LINES ] && END=$LINES
+  sed -n "${START},${END}p" "$MINERU_MD" > /tmp/mineru_chunk_${i}.md
+  echo "Created chunk $i: lines $START-$END"
+done
+```
+
+**Step 2: 并行 Spawn Subagents**
+
+```xml
+<sessions_spawn runtime="subagent" mode="run"
+  task="Extract structured information from MinerU markdown chunk 1.
+        
+        Read file: /tmp/mineru_chunk_1.md (lines 1-300)
+        
+        This is a chunk of a paper extracted by MinerU from PDF.
+        Extract ALL content into structured JSON:
+        {
+          'chunk_id': 1,
+          'lines': '1-300',
+          'sections': [{'title': '...', 'content': '核心内容摘要...'}],
+          'figures': [{'id': 'Figure X', 'caption': '...', 'image_file': 'xxx.jpg'}],
+          'formulas': [{'name': '...', 'latex': '$$...$$', 'meaning': '...', 'symbols': {...}}],
+          'tables': [{'id': 'Table X', 'caption': '...', 'content': '...'}],
+          'key_insights': ['...']
+        }
+        
+        IMPORTANT: 
+        - Include EVERY figure mentioned in this chunk
+        - Include EVERY formula with full LaTeX
+        - Include EVERY table
+        - Do NOT skip or summarize content"
+  label="mineru-chunk-1" />
+
+<!-- 更多 subagents... -->
+```
+
+**Step 3: 图片处理（主 session 直接执行）**
+
+图片不需要进 context，主 session 直接复制：
+
+```bash
+# 主 session 直接处理图片，不通过 subagent
+MINERU_IMAGES="/tmp/paper_mineru_${ARXIV_ID}/images"
+ASSETS_PATH="${VAULT_PATH}/assets/${METHOD_NAME}"
+
+mkdir -p "$ASSETS_PATH"
+cp "$MINERU_IMAGES"/*.jpg "$ASSETS_PATH/" 2>/dev/null
+cp "$MINERU_IMAGES"/*.png "$ASSETS_PATH/" 2>/dev/null
+
+# 统计图片数量
+echo "Copied $(ls "$ASSETS_PATH" | wc -l) images"
+```
+
+**Step 4: 主 Session 汇总**
+
+与 arXiv HTML 分块汇总逻辑一致：
+1. 合并所有 `sections` → 构建完整大纲
+2. 合并所有 `figures` → 确保图片数量完整
+3. 合并所有 `formulas` → 去重、检查符号一致性
+4. 合并所有 `tables` → 完整保留
+5. 合并所有 `key_insights` → 提取核心贡献
+
+#### 小论文直接读取
+
+如果 MinerU Markdown < 500 行 且 < 60KB，可以直接 `read` 全部内容。
+
+#### 禁止事项
+
+- ❌ **禁止在主 session 直接 read 大 MinerU Markdown**（>500 行或 >60KB）
+- ❌ **禁止把图片文件内容 read 进 context**（图片只复制，不读取）
+- ❌ **禁止 subagent 返回非结构化文本**（必须返回 JSON）
+- ❌ **禁止跳过分块判断**（每次 MinerU 提取后必须检查大小）
+
 **Step 3: 项目主页（外链，MinerU 也失败时使用）**
 
 查找项目主页图片：
