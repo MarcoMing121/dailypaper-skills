@@ -153,12 +153,21 @@ Claude 以"毒舌但有料的资深研究员"角色点评每篇论文：
 | 批判性分析 | "批判性分析" | 优缺点评估 |
 | 知识提取 | "提取公式" | 公式 + 算法伪代码 |
 
-### 图片获取（多路 fallback）
+### 图片获取（MinerU 自动化）
 
-1. arXiv HTML：提取 `<figure>` 标签的图片 URL（优先）
-2. 项目主页：从摘要 / HTML 找项目链接，抓 teaser 图
-3. PDF 提取：`pdfimages -png`，过滤 > 10KB 的
-4. 写完后跑 `download_note_images.py` 做可达性检查，不可达的自动下载到本地
+1. **MinerU PDF 解析**（首选）：
+   ```bash
+   mineru-open-api extract paper.pdf -o /tmp/paper_mineru/ -f md,json --language en --model pipeline
+   ```
+   - 自动提取图片到 `images/` 目录
+   - 自动识别表格、公式
+   - 已配置 token
+
+2. arXiv HTML：提取 `<figure>` 标签的图片 URL（如果可用）
+
+3. 项目主页：从摘要 / HTML 找项目链接，抓 teaser 图
+
+4. pdfimages：`pdfimages -png`，过滤 > 10KB 的（最后手段）
 
 ### 笔记生成
 

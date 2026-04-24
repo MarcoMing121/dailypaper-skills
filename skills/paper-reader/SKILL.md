@@ -13,7 +13,7 @@ description: |
   **重要触发词**: "读一下 XXX"、"读一下这篇"、"帮我读" → 必须调用此 skill
 metadata:
   {
-    "openclaw": { "requires": { "bins": ["python3", "pdftotext"], "env": [] } },
+    "openclaw": { "requires": { "bins": ["python3", "mineru-open-api"], "env": [] } },
   }
 ---
 
@@ -141,9 +141,9 @@ VAULT_PATH/
 ### 无 PDF 时的获取流程
 
 1. `python3 assets/zotero_helper.py info {item_id}` 获取论文信息
-2. 按优先级获取：arXiv HTML > arXiv PDF > DOI > WebSearch 标题
+2. 按优先级获取：arXiv HTML（外链）> **MinerU PDF 解析** > 项目主页 > arXiv PDF > DOI
 3. 判断 arXiv ID：从 URL / Zotero extra 字段 / 标题搜索
-4. 推荐直接 WebFetch `https://arxiv.org/html/{arxiv_id}`，无需下载
+4. 首选 MinerU：下载 PDF 后提取（图片 + 表格 + 公式最完整）
 5. 跳过条件：既无 PDF 也无在线来源 / 非论文内容
 
 > Zotero 详细操作见 `references/zotero-guide.md`
@@ -344,111 +344,40 @@ grep -E '<img.*src=' /tmp/paper_${ARXIV_ID}.html | \
 2. **内联概念链接**: 正文中首次出现的技术术语必须用 `[[概念]]` 链接，不仅仅是结尾
 3. **严禁 ASCII 流程图**: 用结构化 Markdown 列表 + `$数学符号$` 描述架构
 4. **公式完整性**: 每个公式必须有名称（`[[概念|名称]]`）、LaTeX 公式、含义、符号说明
-5. **图片外链优先**: arXiv HTML / 项目主页 / GitHub，找不到再本地下载
+5. **MinerU 优先**: 使用 MinerU 自动提取图片、表格、公式，无需手动处理
 6. **第一性原理分析**: 当使用"深度分析"、"第一性原理"、"6点分析"模式时，必须在笔记中包含完整的6点框架分析
 
 > 公式/图片/表格的详细质量规范见 `references/quality-standards.md`
 
-### ⚠️ 图片插入警告（CRITICAL - 必须执行）
+### ⚠️ 图片处理（MinerU 自动化）
 
-> **历史教训 (2026-03-30)**：处理12篇论文时，完全没有插入图片，违反了 skill 核心要求。
-> 
-> **根本原因**：只用了 `curl + pdftotext` 提取文本，没有按照流程获取图片。
-> 
-> **后果**：笔记质量严重下降，缺少关键的视觉信息。
+**核心原则**：MinerU 自动处理图片、表格、公式，无需手动下载或检查可达性。
 
-**强制执行规则**：
+**自检清单**：
+- [ ] 已使用 MinerU 提取 PDF 内容？
+- [ ] 已检查 MinerU 输出的 images/ 目录？
+- [ ] 图片已复制到 `ASSETS_PATH` 并在笔记中引用？
+- [ ] 图片数量与论文 Figure 数量一致？
 
-1. ❌ **禁止只用 `curl + pdftotext` 处理论文**（这只是文本提取，不是完整的论文处理）
-2. ✅ **必须执行完整的图片获取流程**（见下方）
-3. ✅ **必须在笔记中插入所有 Figure**（不能遗漏任何一张）
-4. ✅ **保存后必须运行图片可靠性检查脚本**
+### 图片获取流程（外链优先 + MinerU + 项目主页兜底）
 
-**自检清单（每篇论文必须确认）**：
-- [ ] 已统计论文 Figure 总数？
-- [ ] 已从 arXiv HTML 提取所有 `<figure>`？
-- [ ] **已识别组合图并包含所有子图？**（CRITICAL）
-- [ ] 图片数量与论文一致？
-- [ ] 已运行 `download_note_images.py` 检查可达性？
-- [ ] 笔记中每个 Figure 都有对应的图片？
-
-### 图片获取流程（多源 fallback）
-
-**⚠️ 核心原则：外链优先，本地兜底**
+**核心原则：外链优先，MinerU 其次，项目主页兜底**
 
 > **为什么外链优先？**
-> - 减小仓库体积
+> - 最简单直接，无需下载和处理
 > - 图片与 arXiv 保持同步
-> - 只下载必要的图片
 
-### 流程（严格按顺序执行）
+**优先级**：arXiv HTML（外链）> MinerU PDF（本地）> 项目主页（外链）
 
-**Step 1: arXiv HTML（首选，唯一推荐）**
+**Step 1: arXiv HTML（首选，外链）**
+
 ```bash
 # 1. 检查官方 HTML
 curl -sI "https://arxiv.org/html/{arxiv_id}" | head -1
 
-# 如果返回 200，提取图片
+# 2. 如果返回 200，提取图片（用外链写入笔记）
 curl -sL "https://arxiv.org/html/{arxiv_id}" | grep -E '<figure|<img.*src='
-
-# 图片 URL 格式
-# https://arxiv.org/html/2603.19312v2/x1.png
 ```
-
-**⚠️ 组合图检测（CRITICAL - 必须检查）**
-
-> **问题**：arXiv 的 `xN.png` 编号与论文 Figure 编号**不一定一致**！
-> 
-> **示例**：LeWM 论文
-> - Figure 3 是组合图 → 包含 x3.png, x4.png, x5.png
-> - Figure 6 是组合图 → 包含 x8.png, x9.png, x10.png, x11.png
-> - 如果笔记只用 x8.png，就漏掉了 x9-x11
-
-**检测方法**：
-
-```bash
-# 运行共享脚本检测组合图
-python3 ../_shared/check_composite_figures.py {arxiv_id}
-
-# 示例输出：
-# ⚠️ COMPOSITE FIGURES (must include ALL sub-images):
-#   Figure S4.F6:
-#     Images: x8.png, x9.png, x10.png, x11.png
-```
-
-**处理规则**：
-
-| Figure 类型 | 示例 | 笔记处理 |
-|-------------|------|----------|
-| **单图** | Figure 1 → x1.png | 插入一张图片 |
-| **组合图** | Figure 6 → x8-x11.png | **必须插入所有子图** |
-
-**组合图笔记格式**：
-
-```markdown
-### Figure 6: Planning Performance across Environments
-
-![](https://arxiv.org/html/2603.19312v2/x8.png)
-![](https://arxiv.org/html/2603.19312v2/x9.png)
-![](https://arxiv.org/html/2603.19312v2/x10.png)
-![](https://arxiv.org/html/2603.19312v2/x11.png)
-
-**说明**: 不同环境下的规划性能对比。LeWM 在 PushT、OGBench-Cube、Two-Room、Reacher 均表现优异。
-```
-
-**自检清单（组合图）**：
-- [ ] 已解析 HTML 中的 `<figure>` 嵌套结构？
-- [ ] 已识别所有组合图（多子图的 Figure）？
-- [ ] 每个组合图的所有子图都插入到笔记中？
-- [ ] 图片数量与论文 Figure 数量一致？
-
-**⚠️ 禁止使用 ar5iv**
-
-| 站点 | 状态 | 说明 |
-|------|------|------|
-| **arxiv.org/html** | ✅ 首选 | 官方 HTML，最可靠 |
-| **ar5iv.org** | ❌ 禁止 | 可能返回空白图片 |
-| **ar5iv.labs.arxiv.org** | ❌ 禁止 | 同上 |
 
 **图片 URL 格式**：
 ```
@@ -456,91 +385,67 @@ python3 ../_shared/check_composite_figures.py {arxiv_id}
 ❌ 错误：https://ar5iv.labs.arxiv.org/html/2603.07648/assets/x1.png
 ```
 
-**验证图片可达性**：
+**Step 2: MinerU PDF 解析（本地，外链不可用时使用）**
+
+**当 arXiv HTML 没有图片时**，用 MinerU 从 PDF 提取：
+
 ```bash
-curl -sI "https://arxiv.org/html/2603.19312v2/x1.png" | head -1
-# 返回 HTTP/2 200 表示可达
+# 1. 下载 PDF
+curl -sL "https://arxiv.org/pdf/${ARXIV_ID}.pdf" -o /tmp/paper_${ARXIV_ID}.pdf
+
+# 2. MinerU extract（已配置 token）
+mineru-open-api extract /tmp/paper_${ARXIV_ID}.pdf -o /tmp/paper_mineru_${ARXIV_ID}/ -f md,json --language en --model pipeline
+
+# 3. 输出结构
+# /tmp/paper_mineru_${ARXIV_ID}/
+# ├── paper.md          ← Markdown 内容（含 LaTeX 公式）
+# ├── paper.json        ← 结构化 JSON
+# └── images/           ← 自动提取的图片
 ```
 
-**如果 arxiv.org/html 404 或图片不全**：
-1. 查找项目主页（GitHub Pages 等）
-2. 最后才考虑本地 PDF 提取
+**MinerU 优势**（vs pdfimages / 外链）：
+- **表格识别**：自动转换为 Markdown 表格
+- **公式识别**：LaTeX 格式输出
+- **图片提取**：自动分离并保存到 images/ 目录
+- **OCR 支持**：80+ 语言
+- **内容完整**：不会遗漏任何 Figure
 
-**Step 2: 项目主页（HTML 404 或图片不全时）**
+**Step 3: 项目主页（外链，MinerU 也失败时使用）**
+
+查找项目主页图片：
 ```bash
 # 1. 从摘要/HTML 查找项目主页 URL
 grep -E 'project page|github.io|our website' /tmp/paper_html.txt
 
-# 2. WebFetch 项目主页
-# 3. 提取图片 URL
-# 4. 用外链写入笔记
+# 2. 提取图片 URL，用外链写入笔记
 ```
 
-**Step 3: PDF 提取（最后手段）**
+**Step 4: 复制 MinerU 图片到 Vault**
+
 ```bash
-# 只在前两者都失败时使用
-pdfimages -png paper.pdf output_prefix
-# 筛选 >10KB 的有效图片
+VAULT=/root/.openclaw/shared/ObsidianVault
+ASSETS_PATH=$VAULT/assets/{method_name}
+
+mkdir -p $ASSETS_PATH
+cp /tmp/paper_mineru_${ARXIV_ID}/images/*.jpg $ASSETS_PATH/
+
+# 重命名为有意义的文件名（按 Figure 编号）
+mv $ASSETS_PATH/xxx.jpg $ASSETS_PATH/fig1-overview.jpg
 ```
+
+**笔记中引用**：
+
+| 来源 | 格式 | 示例 |
+|------|------|------|
+| **arXiv HTML（首选）** | Markdown 外链 | `![](https://arxiv.org/html/xxx/x1.png)` |
+| MinerU PDF | Obsidian wikilink | `![[NCP/fig1-overview.jpg\|500]]` |
+| 项目主页 | Markdown 外链 | `![](https://project.page/xxx.png)` |
 
 ### ⚠️ 禁止事项
 
 - ❌ **禁止使用 ar5iv 链接**（可能返回空白图片）
-- ❌ **禁止直接跳到 PDF 提取**（必须先尝试 arXiv HTML）
-- ❌ **禁止下载所有图片**（只下载不可达的）
-- ❌ **禁止跳过可达性检查**（必须运行 download_note_images.py）
-
-### 图片可靠性保障（生成后自动执行）
-
-笔记保存后，运行图片可达性检查脚本，自动将不可访问的外链图片下载到本地：
-
-```bash
-python3 ../daily-papers/download_note_images.py "{笔记完整路径}"
-```
-
-- 可达的外链保持不动，不可达的自动下载到 `assets/{method_name}/` 并替换为 Obsidian wikilink
-- 如有本地化操作，frontmatter `image_source` 自动更新为 `mixed`
-
-**这就是为什么外链优先**：脚本会自动处理不可达的图片，我们不需要预先下载所有图片。
-
-### ⚠️ 图片引用格式规范（CRITICAL）
-
-**创建笔记时**：
-
-| 格式 | 示例 | 使用场景 |
-|------|------|----------|
-| **Markdown 外链** | `![](https://arxiv.org/html/xxx/assets/x1.png)` | ✅ **首选**，创建笔记时使用 |
-| **Obsidian wikilink** | `![[Pi05/fig1.png\|600]]` | ⚠️ 仅由 script 自动生成 |
-
-**为什么必须用 Markdown 外链格式？**
-1. `download_note_images.py` 只识别 `![](https://...)` 格式
-2. 外链格式允许 script 检查可达性
-3. 不可达的会自动转换为 Obsidian wikilink
-
-**Script 自动转换流程**：
-```
-笔记中的外链                          Script 处理后
-─────────────────────────────────────────────────────────────
-![](https://arxiv.org/.../x1.png)  →  ![[Pi05/fig1.png|600]]  (不可达)
-![](https://arxiv.org/.../x2.png)  →  保持不变               (可达)
-```
-
-**最终 assets 结构**：
-```
-VAULT_PATH/
-├── Papers/
-│   └── 2-VLA/
-│       └── Pi05.md               ← 笔记
-└── assets/
-    └── Pi05/                     ← 该笔记的 assets
-        ├── fig1.png              ← 从外链下载
-        └── fig2.png
-```
-
-**禁止事项**：
-- ❌ 禁止在创建笔记时使用 Obsidian wikilink（script 无法识别）
-- ❌ 禁止使用相对路径（必须是完整 URL）
-- ❌ 禁止手动下载图片到 assets 目录（由 script 自动处理）
+- ❌ **禁止跳过图片**（必须包含所有 Figure）
+- ❌ **禁止从 PDF 用 pdfimages**（用 MinerU 替代）
 
 ### 公式格式
 

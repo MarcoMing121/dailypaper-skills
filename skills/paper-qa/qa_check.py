@@ -239,14 +239,59 @@ def check_formula_format(text: str) -> dict:
     }
 
 
+def extract_key_formulas_section(text: str) -> tuple[int, int]:
+    """Extract the range of '关键公式' section.
+    
+    Returns:
+        (start, end) positions, or (0, 0) if not found
+        
+    Note:
+        Only checks formulas in the dedicated "关键公式" section.
+        Formulas embedded in explanatory text (like in "方法详解") are not checked,
+        as they are part of paragraph explanations and don't need independent names/meanings/symbols.
+    """
+    # Find "## 关键公式" or "## Key Formulas"
+    section_match = re.search(r'^##\s+(关键公式|Key\s+Formula)', text, re.MULTILINE)
+    if not section_match:
+        return (0, 0)
+    
+    start = section_match.start()
+    
+    # Find the next ## heading
+    next_section = re.search(r'^##\s+', text[start + 10:], re.MULTILINE)
+    if next_section:
+        end = start + 10 + next_section.start()
+    else:
+        end = len(text)
+    
+    return (start, end)
+
+
 def check_formula_naming(text: str) -> dict:
-    """Check if formulas have names (heading or [[Concept|Name]] link)."""
+    """Check if formulas have names (heading or [[Concept|Name]] link).
+    
+    Only checks formulas in the '关键公式' section.
+    """
     issues = []
+    
+    # Extract "关键公式" section range
+    key_section_start, key_section_end = extract_key_formulas_section(text)
+    
+    if key_section_start == 0 and key_section_end == 0:
+        # No "关键公式" section found, check all formulas (backward compatible)
+        key_section_start = 0
+        key_section_end = len(text)
     
     # Find all $$ blocks
     pattern = re.compile(r'\$\$(.+?)\$\$', re.DOTALL)
     
+    key_formula_count = 0
     for i, match in enumerate(pattern.finditer(text), 1):
+        # Skip if not in "关键公式" section
+        if not (key_section_start <= match.start() <= key_section_end):
+            continue
+        
+        key_formula_count += 1
         start = match.start()
         
         # Check if there's a heading or named link before the formula
@@ -268,18 +313,35 @@ def check_formula_naming(text: str) -> dict:
     return {
         "ok": len(issues) == 0,
         "issues": issues,
-        "stats": {"total": len(pattern.findall(text))}
+        "stats": {"total": key_formula_count, "in_section": key_formula_count}
     }
 
 
 def check_symbol_explanation(text: str) -> dict:
-    """Check if formulas have symbol explanations below."""
+    """Check if formulas have symbol explanations below.
+    
+    Only checks formulas in the '关键公式' section.
+    """
     issues = []
+    
+    # Extract "关键公式" section range
+    key_section_start, key_section_end = extract_key_formulas_section(text)
+    
+    if key_section_start == 0 and key_section_end == 0:
+        # No "关键公式" section found, check all formulas (backward compatible)
+        key_section_start = 0
+        key_section_end = len(text)
     
     # Find all $$ blocks
     pattern = re.compile(r'\$\$(.+?)\$\$', re.DOTALL)
     
+    key_formula_count = 0
     for i, match in enumerate(pattern.finditer(text), 1):
+        # Skip if not in "关键公式" section
+        if not (key_section_start <= match.start() <= key_section_end):
+            continue
+        
+        key_formula_count += 1
         end = match.end()
         
         # Check if there's symbol explanation in the next 300 characters
@@ -305,18 +367,35 @@ def check_symbol_explanation(text: str) -> dict:
     return {
         "ok": len(issues) == 0,
         "issues": issues,
-        "stats": {"total": len(pattern.findall(text))}
+        "stats": {"total": key_formula_count, "in_section": key_formula_count}
     }
 
 
 def check_formula_meaning(text: str) -> dict:
-    """Check if formulas have '含义' (meaning) explanation below."""
+    """Check if formulas have '含义' (meaning) explanation below.
+    
+    Only checks formulas in the '关键公式' section.
+    """
     issues = []
+    
+    # Extract "关键公式" section range
+    key_section_start, key_section_end = extract_key_formulas_section(text)
+    
+    if key_section_start == 0 and key_section_end == 0:
+        # No "关键公式" section found, check all formulas (backward compatible)
+        key_section_start = 0
+        key_section_end = len(text)
     
     # Find all $$ blocks
     pattern = re.compile(r'\$\$(.+?)\$\$', re.DOTALL)
     
+    key_formula_count = 0
     for i, match in enumerate(pattern.finditer(text), 1):
+        # Skip if not in "关键公式" section
+        if not (key_section_start <= match.start() <= key_section_end):
+            continue
+        
+        key_formula_count += 1
         end = match.end()
         
         # Check if there's meaning explanation in the next 300 characters
@@ -336,7 +415,7 @@ def check_formula_meaning(text: str) -> dict:
     return {
         "ok": len(issues) == 0,
         "issues": issues,
-        "stats": {"total": len(pattern.findall(text))}
+        "stats": {"total": key_formula_count, "in_section": key_formula_count}
     }
 
 
