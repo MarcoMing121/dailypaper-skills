@@ -556,18 +556,55 @@ grep -E 'project page|github.io|our website' /tmp/paper_html.txt
 # 2. 提取图片 URL，用外链写入笔记
 ```
 
-**Step 4: 复制 MinerU 图片到 Vault**
+**Step 4: 筛选需要的图片**
+
+> ⚠️ **CRITICAL**: 不要复制 MinerU 提取的全部图片！只保存笔记中要引用的。
+
+```bash
+# 1. 从 Markdown 找出要用的图片（grep '![](images/' paper.md）
+grep -E '!\[.*\]\(images/' /tmp/paper_mineru_${ARXIV_ID}/paper_${ARXIV_ID}.md | head -20
+
+# 2. 通常只需要主 Figure（Figure 1, 2, 3...）
+# MinerU 可能把公式、表格都截成图片，这些不需要保存
+
+# 3. 记录需要的图片 hash 名
+# 例如: 58889c670a6563b3f2d0a1b76bd90a26bde68224fdb7192950463cb7ca16346e.jpg
+```
+
+**Step 5: 复制并重命名图片**
 
 ```bash
 VAULT=/root/.openclaw/shared/ObsidianVault
 ASSETS_PATH=$VAULT/assets/{method_name}
 
 mkdir -p $ASSETS_PATH
-cp /tmp/paper_mineru_${ARXIV_ID}/images/*.jpg $ASSETS_PATH/
 
-# 重命名为有意义的文件名（按 Figure 编号）
-mv $ASSETS_PATH/xxx.jpg $ASSETS_PATH/fig1-overview.jpg
+# 只复制需要的图片（不是 cp *.jpg！）
+cp /tmp/paper_mineru_${ARXIV_ID}/images/58889c...46e.jpg $ASSETS_PATH/fig1_comparison.jpg
+cp /tmp/paper_mineru_${ARXIV_ID}/images/bdb289...74.jpg $ASSETS_PATH/fig2_calibration.jpg
+# ... 只复制笔记要引用的
+
+# 重命名为有意义的名字
+# 格式: fig{N}_{英文描述}.jpg
+# 例如: fig1_overview.jpg, fig2_architecture.jpg, fig3_results.jpg
 ```
+
+**Step 6: 清理无用图片**
+
+```bash
+# 删除 MinerU 临时目录（避免占用空间）
+rm -rf /tmp/paper_mineru_${ARXIV_ID}
+
+# 或只删除未复制的图片
+# find $ASSETS_PATH -name "*.jpg" ! -name "fig*.jpg" -delete
+```
+
+### ⚠️ 图片自检清单（CRITICAL）
+
+- [ ] **只保存笔记引用的图片**？（不是 MinerU 提取的全部）
+- [ ] **图片名有意义**？（`fig1_comparison.jpg` > `58889c...jpg`）
+- [ ] **笔记引用与文件名一致**？（检查 `![[fig1_xxx.jpg]]` 存在）
+- [ ] **删除了无用图片**？（MinerU 提取的公式/表格截图）
 
 **笔记中引用**：
 
