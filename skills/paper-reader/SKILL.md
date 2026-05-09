@@ -393,10 +393,15 @@ curl -sL "https://arxiv.org/html/{arxiv_id}" | grep -E '<figure|<img.*src='
 # 1. 下载 PDF
 curl -sL "https://arxiv.org/pdf/${ARXIV_ID}.pdf" -o /tmp/paper_${ARXIV_ID}.pdf
 
-# 2. MinerU extract（已配置 token）
+# 2. 检查 PDF 大小
+PDF_SIZE=$(wc -c < /tmp/paper_${ARXIV_ID}.pdf)
+echo "PDF size: $PDF_SIZE bytes ($(echo $PDF_SIZE | awk '{printf "%.1f", $1/1024/1024}') MB)"
+
+# 3. 如果 PDF > 5MB，使用分页处理（见下方 Step 2.1）
+# 如果 PDF <= 5MB，直接 MinerU 提取
 mineru-open-api extract /tmp/paper_${ARXIV_ID}.pdf -o /tmp/paper_mineru_${ARXIV_ID}/ -f md,json --language en --model pipeline
 
-# 3. 输出结构
+# 4. 输出结构
 # /tmp/paper_mineru_${ARXIV_ID}/
 # ├── paper.md          ← Markdown 内容（含 LaTeX 公式）
 # ├── paper.json        ← 结构化 JSON
@@ -409,6 +414,211 @@ mineru-open-api extract /tmp/paper_${ARXIV_ID}.pdf -o /tmp/paper_mineru_${ARXIV_
 - **图片提取**：自动分离并保存到 images/ 目录
 - **OCR 支持**：80+ 语言
 - **内容完整**：不会遗漏任何 Figure
+
+### ⚠️ Step 2.1: 大 PDF 分页处理（CRITICAL - 防止 OSS 上传超时）
+
+> **更新 (2026-05-09)**：MinerU OSS 上传限制约 **1 MB**，超过此限制会导致 `context deadline exceeded` 错误。
+
+#### 问题
+
+| PDF 大小 | 上传时间 | 结果 |
+|---------|---------|------|
+| **< 1 MB** | **< 30s** | **✅ 成功** |
+| **≥ 1 MB** | **> 30s** | **🚨 经常超时** |
+
+**案例**：
+- 2.6 MB PDF：超时 ❌
+- 0.9 MB PDF：成功 ✅
+- 1.67 MB 单页：超时 → 压缩到 0.15 MB → 成功 ✅
+
+#### 解决方案：自动分割脚本
+
+**核心思路**：
+- 使用 `scripts/split_pdf_for_mineru.sh` 自动分割 PDF
+- 每个 chunk < 1 MB
+- 自动压缩超限的单页（使用 Ghostscript）
+
+**使用方法**：
+
+```bash
+# 方法1: 直接调用脚本
+./dailypaper-skills/skills/paper-reader/scripts/split_pdf_for_mineru.sh \
+    /tmp/paper.pdf /tmp/paper_chunks
+
+# 方法2: 在 SKILL.md 流程中自动调用
+# 脚本会自动：
+# 1. 检查 PDF 大小
+# 2. 如果 < 1MB：不分割，直接使用
+# 3. 如果 ≥ 1MB：分割为 chunks（每个 < 1MB）
+# 4. 自动压缩超限的单页
+```
+
+**输出示例**：
+
+```
+📄 Input PDF: /tmp/paper_synaptic.pdf
+   Size: 10.6 MB
+   Pages: 39
+
+⚠️  PDF > 1MB, splitting into chunks...
+
+Step 1: Splitting into single pages (pdftk burst)...
+   Split into 39 pages
+
+Step 2: Analyzing page sizes...
+
+Step 3: Merging pages into chunks (< 1MB, greedy packing)...
+   Chunk 0 (pages 1-2): 0.19 MB
+   Chunk 1 (pages 3-3): 1.11 MB
+   Chunk 2 (pages 4-5): 0.81 MB
+   Chunk 6 (pages 9-18): 0.90 MB    ← 合并了 10 页！
+   Chunk 7 (pages 19-26): 0.89 MB   ← 合并了 8 页！
+   ...
+
+Step 4: Checking for oversized chunks...
+   Found 7 oversized chunk(s), compressing...
+   Compressing chunk_5.pdf (1.55 MB)...
+   ✅ Compressed to 0.12 MB
+
+Step 5: Cleaning up temp files...
+
+✅ Done! Created 14 chunks
+   Output directory: /tmp/paper_chunks
+```
+
+**脚本特性**：
+- 使用 `pdftk burst` 正确分割（`pdfseparate` 有 bug）
+- 贪心合并小页面（如 10 页合并为 0.9 MB）
+- 自动压缩超限的单页
+
+#### 完整流程（集成到 SKILL.md）
+
+**Step 1: 下载 PDF 并检查大小**
+
+```bash
+# 下载 PDF
+curl -sL "https://openreview.net/pdf?id=xxx" -o /tmp/paper.pdf
+
+# 检查大小
+PDF_SIZE=$(wc -c < /tmp/paper.pdf)
+PDF_MB=$(echo $PDF_SIZE | awk '{printf "%.1f", $1/1024/1024}')
+echo "PDF size: $PDF_MB MB"
+
+if [ $PDF_SIZE -gt 1048576 ]; then  # 1MB = 1024*1024
+  echo "⚠️ PDF > 1MB, using split script"
+else
+  echo "✅ PDF < 1MB, direct MinerU extraction"
+  mineru-open-api extract /tmp/paper.pdf -o /tmp/paper_mineru/ -f md,json --language en --model pipeline
+fi
+```
+
+**Step 2: 使用分割脚本（如果需要）**
+
+```bash
+# 调用自动分割脚本
+./dailypaper-skills/skills/paper-reader/scripts/split_pdf_for_mineru.sh \
+    /tmp/paper.pdf /tmp/paper_chunks
+
+# 脚本会自动：
+# - 分割 PDF
+# - 压缩超限的单页
+# - 输出所有 chunks
+```
+
+**Step 3: 逐个上传 MinerU**
+
+```bash
+# 创建输出目录
+mkdir -p /tmp/paper_mineru/images
+
+# 逐个处理 chunk
+for chunk in /tmp/paper_chunks/chunk_*.pdf; do
+  chunk_name=$(basename "$chunk" .pdf)
+  chunk_dir="/tmp/paper_mineru_$chunk_name"
+  
+  echo "Processing $chunk_name..."
+  mineru-open-api extract "$chunk" -o "$chunk_dir" -f md,json --language en --model pipeline --timeout 300
+  
+  # 合并 Markdown
+  if [ -f "$chunk_dir/$chunk_name.md" ]; then
+    cat "$chunk_dir/$chunk_name.md" >> /tmp/paper_mineru/paper.md
+  fi
+  
+  # 收集图片
+  if [ -d "$chunk_dir/images" ]; then
+    cp -r "$chunk_dir/images"/* /tmp/paper_mineru/images/ 2>/dev/null || true
+  fi
+done
+
+echo "✅ All chunks processed"
+echo "Output: /tmp/paper_mineru/paper.md"
+```
+
+#### 自检清单（大 PDF 处理）
+
+- [ ] PDF 大小已检查？
+- [ ] 如果 ≥1MB 已使用分割脚本？
+- [ ] 所有 chunks 都 < 1MB？
+- [ ] MinerU 提取成功？
+- [ ] Markdown 已合并？
+- [ ] 图片已收集？
+
+#### 禁止事项
+
+- ❌ **禁止直接上传 ≥1MB PDF 到 MinerU**（会超时）
+- ❌ **禁止跳过压缩步骤**（超限的单页会导致失败）
+- ❌ **禁止并发上传多个 chunks**（MinerU 有并发限制）
+
+#### 替代方案：降级到本地 PDF 提取
+
+如果 MinerU OSS 上传超时（`context deadline exceeded while awaiting headers`），使用本地工具：
+
+**方案 1: PDF 压缩 + 重试**
+
+```bash
+# 压缩 PDF（需要 ghostscript）
+gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook \
+   -dNOPAUSE -dQUIET -dBATCH \
+   -sOutputFile=/tmp/paper_compressed.pdf \
+   /tmp/paper.pdf
+
+# 重试 MinerU
+mineru-open-api extract /tmp/paper_compressed.pdf -o /tmp/paper_mineru/ -f md,json --language en --model pipeline --timeout 600
+```
+
+**方案 2: 本地提取工具（降级）**
+
+```bash
+# 提取文本
+pdftotext /tmp/paper.pdf /tmp/paper.txt
+
+# 提取图片（每页转为 PNG）
+mkdir -p /tmp/paper_images
+pdftoppm /tmp/paper.pdf /tmp/paper_images/page -png
+
+# 统计
+echo "文本: $(wc -l < /tmp/paper.txt) 行"
+echo "图片: $(ls /tmp/paper_images/*.png | wc -l) 张"
+```
+
+**注意**: 本地工具缺点：
+- 无表格识别（表格变为混乱文本）
+- 无公式识别（公式变为图片）
+- 图片质量可能较低
+
+**方案 3: 直接读取 PDF（最后手段）**
+
+```bash
+# 如果 PDF 文本可直接提取
+pdftotext /tmp/paper.pdf - | head -100
+```
+
+#### 自检清单（MinerU 超时处理）
+
+- [ ] 已尝试压缩 PDF？
+- [ ] 已增加 --timeout 参数？
+- [ ] 如果仍然超时，已降级到本地工具？
+- [ ] 笔记中已标注"图片待补充"？
 
 ### ⚠️ 1.6 MinerU Markdown 分块提取（CRITICAL - 防止 Context Overflow）
 
