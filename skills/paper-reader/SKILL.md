@@ -770,51 +770,65 @@ grep -E 'project page|github.io|our website' /tmp/paper_html.txt
 
 > ⚠️ **CRITICAL**: 不要复制 MinerU 提取的全部图片！只保存笔记中要引用的。
 
+**Step 5: 运行图片提取脚本（安全、自动验证）**
+
 ```bash
-# 1. 从 Markdown 找出要用的图片（grep '![](images/' paper.md）
-grep -E '!\[.*\]\(images/' /tmp/paper_mineru_${ARXIV_ID}/paper_${ARXIV_ID}.md | head -20
+# 使用安全脚本提取图片（自动验证、只复制引用的图片）
+./dailypaper-skills/skills/paper-reader/scripts/extract_and_save_images.sh \
+    /tmp/paper_mineru_${ARXIV_ID} \
+    $VAULT/assets/{method_name} \
+    $VAULT/Papers/{category}/{method_name}.md
 
-# 2. 通常只需要主 Figure（Figure 1, 2, 3...）
-# MinerU 可能把公式、表格都截成图片，这些不需要保存
-
-# 3. 记录需要的图片 hash 名
-# 例如: 58889c670a6563b3f2d0a1b76bd90a26bde68224fdb7192950463cb7ca16346e.jpg
+# 脚本会自动：
+# 1. 统计 MinerU 提取的图片数量（验证提取成功）
+# 2. 从笔记中提取引用的图片（只复制需要的）
+# 3. 验证复制成功（0 张则报错）
+# 4. 保留临时目录备份（不自动删除，安全）
 ```
 
-**Step 5: 复制并重命名图片**
+**手动操作（如果脚本不可用）**
 
 ```bash
-VAULT=/root/.openclaw/shared/ObsidianVault
-ASSETS_PATH=$VAULT/assets/{method_name}
+# 1. 先统计源图片数量
+SOURCE_COUNT=$(find /tmp/paper_mineru_${ARXIV_ID} -path "*/images/*.jpg" -type f | wc -l)
+echo "MinerU extracted: $SOURCE_COUNT images"
 
-mkdir -p $ASSETS_PATH
+if [ "$SOURCE_COUNT" -eq 0 ]; then
+    echo "❌ ERROR: No images found! Check MinerU extraction."
+    exit 1
+fi
 
-# 只复制需要的图片（不是 cp *.jpg！）
-cp /tmp/paper_mineru_${ARXIV_ID}/images/58889c...46e.jpg $ASSETS_PATH/fig1_comparison.jpg
-cp /tmp/paper_mineru_${ARXIV_ID}/images/bdb289...74.jpg $ASSETS_PATH/fig2_calibration.jpg
-# ... 只复制笔记要引用的
+# 2. 从笔记找出引用的图片
+grep -oP '!\[\[[^\]]*\.jpg\]\]' $NOTE_FILE | sed 's/!\[\[//; s/\]\]//; s/.*\///'
 
-# 重命名为有意义的名字
-# 格式: fig{N}_{英文描述}.jpg
-# 例如: fig1_overview.jpg, fig2_architecture.jpg, fig3_results.jpg
-```
+# 3. 创建目标目录
+mkdir -p $VAULT/assets/{method_name}
 
-**Step 6: 清理无用图片**
+# 4. 复制图片（先复制，后验证）
+for img in fig1_overview fig2_architecture fig3_results; do
+    find /tmp/paper_mineru_${ARXIV_ID} -name "*${img}*" -exec cp {} $VAULT/assets/{method_name}/ \;
+done
 
-```bash
-# 删除 MinerU 临时目录（避免占用空间）
-rm -rf /tmp/paper_mineru_${ARXIV_ID}
+# 5. 验证复制成功
+COPIED=$(ls $VAULT/assets/{method_name}/*.jpg 2>/dev/null | wc -l)
+echo "Copied: $COPIED images"
 
-# 或只删除未复制的图片
-# find $ASSETS_PATH -name "*.jpg" ! -name "fig*.jpg" -delete
+if [ "$COPIED" -eq 0 ]; then
+    echo "❌ ERROR: No images were copied!"
+    exit 1
+fi
+
+# 6. 保留临时目录（不删除，作为备份）
+# rm -rf /tmp/paper_mineru_${ARXIV_ID}  ← 不要删除！
 ```
 
 ### ⚠️ 图片自检清单（CRITICAL）
 
+- [ ] **MinerU 提取成功**？（检查图片数量 > 0）
 - [ ] **只保存笔记引用的图片**？（不是 MinerU 提取的全部）
 - [ ] **图片名有意义**？（`fig1_comparison.jpg` > `58889c...jpg`）
 - [ ] **笔记引用与文件名一致**？（检查 `![[fig1_xxx.jpg]]` 存在）
-- [ ] **删除了无用图片**？（MinerU 提取的公式/表格截图）
+- [ ] **验证复制成功**？（assets 目录图片数 > 0）
 
 **笔记中引用**：
 
