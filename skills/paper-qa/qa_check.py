@@ -423,16 +423,18 @@ def check_concept_links(text: str, vault_path: Path) -> dict:
     """Check concept link validity."""
     issues = []
     
-    # Extract all [[Concept]] links
-    concepts = re.findall(r'\[\[([A-Za-z0-9_-]+)\]\]', text)
+    # Extract all [[Concept]] links (support spaces in concept names)
+    concepts = re.findall(r'\[\[([A-Za-z0-9_\s-]+)\]\]', text)
     unique_concepts = set(concepts)
     
     concepts_path = vault_path / "Concepts"
     
     missing = []
     for concept in unique_concepts:
+        # Concept file uses underscore instead of space
+        concept_filename = concept.replace(' ', '_')
         # Search for concept file
-        found = list(concepts_path.glob(f"*/*{concept}.md"))
+        found = list(concepts_path.glob(f"*/*{concept_filename}.md"))
         if not found:
             missing.append(concept)
     
@@ -647,16 +649,18 @@ def check_concept_links(text: str, vault_path: Path) -> dict:
     """Check concept link validity."""
     issues = []
     
-    # Extract all [[Concept]] links
-    concepts = re.findall(r'\[\[([A-Za-z0-9_-]+)\]\]', text)
+    # Extract all [[Concept]] links (support spaces in concept names)
+    concepts = re.findall(r'\[\[([A-Za-z0-9_\s-]+)\]\]', text)
     unique_concepts = set(concepts)
     
     concepts_path = vault_path / "Concepts"
     
     missing = []
     for concept in unique_concepts:
+        # Concept file uses underscore instead of space
+        concept_filename = concept.replace(' ', '_')
         # Search for concept file
-        found = list(concepts_path.glob(f"*/*{concept}.md"))
+        found = list(concepts_path.glob(f"*/*{concept_filename}.md"))
         if not found:
             missing.append(concept)
     
