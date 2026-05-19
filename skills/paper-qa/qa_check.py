@@ -424,7 +424,7 @@ def check_concept_links(text: str, vault_path: Path) -> dict:
     issues = []
     
     # Extract all [[Concept_Name]] links (underscore format, no spaces)
-    concepts = re.findall(r'\[\[([A-Za-z0-9_-]+)\]\]', text)
+    concepts = re.findall(r'\[\[([A-Za-z0-9_-]+)(?:\|[^]]+)?\]\]', text)
     unique_concepts = set(concepts)
     
     concepts_path = vault_path / "Concepts"
@@ -648,7 +648,7 @@ def check_concept_links(text: str, vault_path: Path) -> dict:
     issues = []
     
     # Extract all [[Concept_Name]] links (underscore format, no spaces)
-    concepts = re.findall(r'\[\[([A-Za-z0-9_-]+)\]\]', text)
+    concepts = re.findall(r'\[\[([A-Za-z0-9_-]+)(?:\|[^]]+)?\]\]', text)
     unique_concepts = set(concepts)
     
     concepts_path = vault_path / "Concepts"
