@@ -24,6 +24,15 @@ metadata:
 
 从社交平台提取 KOL 观点、会议 talk 启发、行业洞察，保存到 Obsidian 笔记库。
 
+## 缓存目录
+
+所有下载的图片存放在：
+```
+/root/.openclaw/workspaces/paper-agent/.cache/social-images/
+```
+
+定期清理：cron job 每天凌晨 3 点清理超过 7 天的图片。
+
 ## 使用场景
 
 | 场景 | 示例 |
@@ -73,28 +82,104 @@ tags: [3DV, 物理理解, world-model, insight]
 
 - [ ] 搜索苏昊的相关论文
 - [ ] 思考：如何量化"物理理解的错觉"？
+
+## 原文链接
+
+http://xhslink.com/o/xxx
+
+> ⚠️ 以上内容来自社交平台，观点经二次解读，请以原始来源为准
+
+## 图片存档
+
+- `/root/.openclaw/workspaces/paper-agent/.cache/social-images/{note_id}_1.jpg`
+- `/root/.openclaw/workspaces/paper-agent/.cache/social-images/{note_id}_2.jpg`
+- ...
 ```
 
 ## Step 1: 平台识别与提取
 
 ### 小红书 (xhslink.com / xiaohongshu.com)
 
+#### 1.1 下载页面 HTML
+
 ```bash
-# 下载页面
 curl -L -s "{xhs_link}" -o /tmp/kol_xhs.html
-
-# 提取标题
-title=$(grep -oP '<title>.*?</title>' /tmp/kol_xhs.html | head -1 | sed 's/<[^>]*>//g')
-
-# 提取描述
-desc=$(grep -oP '<meta name="description" content="[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/.*content="//;s/"$//')
-
-# 提取作者
-author=$(grep -oP '"nickname":"[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/"nickname":"//;s/"$//')
-
-# 提取图片
-img_urls=$(grep -oP 'urlDefault":"[^"]*' /tmp/kol_xhs.html | sed 's/urlDefault":"//g' | sed 's/\\u002F/\//g')
 ```
+
+#### 1.2 提取标题
+
+```bash
+grep -oP '<title>.*?</title>' /tmp/kol_xhs.html | head -1 | sed 's/<[^>]*>//g'
+```
+
+#### 1.3 提取正文描述
+
+```bash
+grep -oP '<meta name="description" content="[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/.*content="//;s/"$//'
+```
+
+#### 1.4 提取作者信息
+
+```bash
+grep -oP '"nickname":"[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/"nickname":"//;s/"$//'
+```
+
+#### 1.5 提取点赞数
+
+```bash
+grep -oP '"likedCount":"[^"]*"' /tmp/kol_xhs.html | head -1
+```
+
+#### 1.6 提取笔记 ID
+
+```bash
+grep -oP '"noteId":"[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/"noteId":"//;s/"//g'
+```
+
+#### 1.7 提取并下载图片
+
+```bash
+# 提取图片 URL（需要反转义 \u002F → /）
+img_urls=$(grep -oP 'urlDefault":"[^"]*' /tmp/kol_xhs.html | sed 's/urlDefault":"//g' | sed 's/\\u002F/\//g')
+
+# 下载所有图片到缓存目录（以笔记 ID + 序号命名）
+note_id=$(grep -oP '"noteId":"[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/"noteId":"//;s/"//g')
+mkdir -p /root/.openclaw/workspaces/paper-agent/.cache/social-images
+
+i=1
+for url in $img_urls; do
+  curl -s "$url" -o "/root/.openclaw/workspaces/paper-agent/.cache/social-images/${note_id}_${i}.jpg"
+  i=$((i+1))
+done
+```
+
+#### 1.8 图片处理（⚠️ 关键：不要 read 图片！）
+
+**❌ 不要用 `read` 工具读取图片！** 图片 base64 会占用大量上下文（每张 100-270KB），导致 context overflow。
+
+图片的作用仅是 **供用户参考的视觉证据**，agent 不需要"看"图片来提取观点——这些信息已从 HTML 正文中提取。
+
+**正确做法：**
+- 下载图片到 `.cache/` 目录（供将来参考）
+- 只在笔记中记录图片路径（不读取、不发送）
+- 如果 HTML 提取失败（正文为空），使用 **OCR 或视觉模型 subagent** 单独处理，结果以文本形式返回主 session
+
+```
+✅ 正确：下载图片 → 记录路径 → 不读取
+❌ 错误：下载图片 → read 图片 → base64 进入上下文
+```
+
+### 小红书可提取内容
+
+| 字段 | 提取方式 | 状态 |
+|------|----------|------|
+| 标题 | `<title>` | ✅ |
+| 正文 | `<meta name="description">` | ✅ |
+| 作者 | `"nickname":"xxx"` | ✅ |
+| 点赞数 | `"likedCount":"xxx"` | ✅ |
+| 笔记 ID | `"noteId":"xxx"` | ✅ |
+| 图片 | `urlDefault` + 反转义 | ✅ |
+| 评论 | JS 动态加载 | ❌ 暂不支持 |
 
 ### Twitter/X (twitter.com / x.com)
 
