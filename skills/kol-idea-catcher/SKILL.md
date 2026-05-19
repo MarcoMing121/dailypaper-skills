@@ -88,12 +88,6 @@ tags: [3DV, 物理理解, world-model, insight]
 http://xhslink.com/o/xxx
 
 > ⚠️ 以上内容来自社交平台，观点经二次解读，请以原始来源为准
-
-## 图片存档
-
-- `/root/.openclaw/workspaces/paper-agent/.cache/social-images/{note_id}_1.jpg`
-- `/root/.openclaw/workspaces/paper-agent/.cache/social-images/{note_id}_2.jpg`
-- ...
 ```
 
 ## Step 1: 平台识别与提取
@@ -143,6 +137,7 @@ grep -oP '"noteId":"[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/"noteId":"//;s/
 img_urls=$(grep -oP 'urlDefault":"[^"]*' /tmp/kol_xhs.html | sed 's/urlDefault":"//g' | sed 's/\\u002F/\//g')
 
 # 下载所有图片到缓存目录（以笔记 ID + 序号命名）
+# 注意：图片仅存档，不在笔记中记录路径
 note_id=$(grep -oP '"noteId":"[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/"noteId":"//;s/"//g')
 mkdir -p /root/.openclaw/workspaces/paper-agent/.cache/social-images
 
