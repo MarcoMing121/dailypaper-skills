@@ -868,6 +868,7 @@ fi
 | **3-World-Model** | `{NOTES_PATH}/3-World-Model/` | 世界模型、JEPA、预测模型 |
 | **4-RL-Theory** | `{NOTES_PATH}/4-RL-Theory/` | 强化学习理论、奖励建模 |
 | **5-Deep-Learning** | `{NOTES_PATH}/5-Deep-Learning/` | 深度学习基础、架构创新 |
+| **6-LNN** | `{NOTES_PATH}/6-LNN/` | Liquid Neural Network、连续时间网络、CfC、LTC、Neural ODE |
 | **_Inbox** | `{NOTES_PATH}/_Inbox/` | 待分类 |
 
 **分类判断**：看论文 tags 的第一个标签 + Abstract 核心问题。
