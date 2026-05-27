@@ -62,13 +62,78 @@ title=$(grep 'title:' {笔记路径} | sed 's/title: *//' | tr -d '"')
 ```bash
 # 下载 PDF
 curl -sL "https://arxiv.org/pdf/${arxiv_id}.pdf" -o /tmp/paper_${arxiv_id}.pdf
+```
 
-# MinerU 提取（完整内容：文本 + 图片 + 公式 + 表格）
+#### PDF 大小检查与自动分割（CRITICAL - 防止 MinerU 超时）
+
+> MinerU OSS 上传限制约 **1 MB**，超过会导致 `context deadline exceeded` 错误。
+
+```bash
+PDF_SIZE=$(wc -c < /tmp/paper_${arxiv_id}.pdf)
+PDF_MB=$(echo $PDF_SIZE | awk '{printf "%.1f", $1/1024/1024}')
+echo "PDF size: $PDF_MB MB"
+```
+
+| PDF 大小 | 处理方式 |
+|---------|---------|
+| **< 1 MB** | 直接 MinerU 提取 |
+| **≥ 1 MB** | 使用分割脚本自动分割 |
+
+**如果 ≥ 1 MB**，使用 paper-reader 的分割脚本：
+
+```bash
+# 调用自动分割脚本（每个 chunk < 1MB）
+./dailypaper-skills/skills/paper-reader/scripts/split_pdf_for_mineru.sh \
+    /tmp/paper_${arxiv_id}.pdf /tmp/paper_chunks_${arxiv_id}
+
+# 逐个处理 chunk
+mkdir -p /tmp/paper_mineru_${arxiv_id}/images
+for chunk in /tmp/paper_chunks_${arxiv_id}/chunk_*.pdf; do
+  chunk_name=$(basename "$chunk" .pdf)
+  chunk_dir="/tmp/paper_mineru_${arxiv_id}_$chunk_name"
+  
+  echo "Processing $chunk_name..."
+  mineru-open-api extract "$chunk" -o "$chunk_dir" -f md,json --language en --model pipeline --timeout 300
+  
+  # 合并 Markdown
+  if [ -f "$chunk_dir/$chunk_name.md" ]; then
+    cat "$chunk_dir/$chunk_name.md" >> /tmp/paper_mineru_${arxiv_id}/paper_${arxiv_id}.md
+  fi
+  
+  # 收集图片
+  if [ -d "$chunk_dir/images" ]; then
+    cp -r "$chunk_dir/images"/* /tmp/paper_mineru_${arxiv_id}/images/ 2>/dev/null || true
+  fi
+done
+```
+
+**如果 < 1 MB**，直接提取：
+
+```bash
 mineru-open-api extract /tmp/paper_${arxiv_id}.pdf \
   -o /tmp/paper_mineru_${arxiv_id}/ \
   -f md,json \
   --language en \
   --model pipeline
+```
+
+#### 降级方案（MinerU 超时）
+
+如果 MinerU 仍然超时，降级到本地工具：
+
+```bash
+# 压缩 PDF（需要 ghostscript）
+gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook \
+   -dNOPAUSE -dQUIET -dBATCH \
+   -sOutputFile=/tmp/paper_${arxiv_id}_compressed.pdf \
+   /tmp/paper_${arxiv_id}.pdf
+
+# 重试 MinerU
+mineru-open-api extract /tmp/paper_${arxiv_id}_compressed.pdf \
+  -o /tmp/paper_mineru_${arxiv_id}/ -f md,json --language en --model pipeline --timeout 600
+
+# 最后手段：本地提取
+pdftotext /tmp/paper_${arxiv_id}.pdf /tmp/paper_${arxiv_id}.txt
 ```
 
 ---
@@ -148,9 +213,15 @@ Performance peaks at α=0.6 (Figure 11), where the probing covers
 **如果原文 > 500 行**，使用分块搜索：
 
 ```bash
+# 检查文件大小
+MINERU_MD="/tmp/paper_mineru_${arxiv_id}/paper_${arxiv_id}.md"
+LINES=$(wc -l < "$MINERU_MD")
+SIZE=$(wc -c < "$MINERU_MD")
+echo "MinerU output: $LINES lines, $SIZE bytes"
+
 # 只搜索相关 section
-grep -n "^## " paper.md | grep -i "{关键词}"
-sed -n '/^{section}/,/^## /p' paper.md > /tmp/relevant_section.md
+grep -n "^## " "$MINERU_MD" | grep -i "{关键词}"
+sed -n '/^{section}/,/^## /p' "$MINERU_MD" > /tmp/relevant_section.md
 ```
 
 **不要全文进 context**，只提取相关段落。
