@@ -321,11 +321,11 @@ AI:
 
 ## 配置
 
-灵感目录路径从 `../_shared/user-config.json` 读取：
+灵感目录路径从 `../_shared/user_config.py` 读取：
 
 ```json
 {
-  "VAULT_PATH": "/root/.openclaw/shared/ObsidianVault",
+  "VAULT_PATH": "<your vault path>",
   "SPARK_PATH": "{VAULT_PATH}/灵光一现"
 }
 ```

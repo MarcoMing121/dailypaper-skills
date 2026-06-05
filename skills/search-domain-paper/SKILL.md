@@ -167,7 +167,7 @@ If datasets are only partially visible:
 
 ## Markdown Output
 
-输出位置：`/root/.openclaw/shared/ObsidianVault/SearchResults/`
+输出位置：`{SEARCH_RESULTS_PATH}`
 
 推荐文件名格式：
 ```
@@ -181,7 +181,7 @@ continual-learning-robot-baseline-table-2026-04-12.md
 
 如果目录不存在，先创建：
 ```bash
-mkdir -p /root/.openclaw/shared/ObsidianVault/SearchResults/
+mkdir -p {SEARCH_RESULTS_PATH}
 ```
 
 Recommended output structure:

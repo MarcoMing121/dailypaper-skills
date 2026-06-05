@@ -28,7 +28,7 @@ metadata:
 
 所有下载的图片存放在：
 ```
-/root/.openclaw/workspaces/paper-agent/.cache/social-images/
+{SOCIAL_IMAGES_CACHE}/
 ```
 
 定期清理：cron job 每天凌晨 3 点清理超过 7 天的图片。
@@ -139,11 +139,11 @@ img_urls=$(grep -oP 'urlDefault":"[^"]*' /tmp/kol_xhs.html | sed 's/urlDefault":
 # 下载所有图片到缓存目录（以笔记 ID + 序号命名）
 # 注意：图片仅存档，不在笔记中记录路径
 note_id=$(grep -oP '"noteId":"[^"]*"' /tmp/kol_xhs.html | head -1 | sed 's/"noteId":"//;s/"//g')
-mkdir -p /root/.openclaw/workspaces/paper-agent/.cache/social-images
+mkdir -p {SOCIAL_IMAGES_CACHE}
 
 i=1
 for url in $img_urls; do
-  curl -s "$url" -o "/root/.openclaw/workspaces/paper-agent/.cache/social-images/${note_id}_${i}.jpg"
+  curl -s "$url" -o "{SOCIAL_IMAGES_CACHE}/${note_id}_${i}.jpg"
   i=$((i+1))
 done
 ```

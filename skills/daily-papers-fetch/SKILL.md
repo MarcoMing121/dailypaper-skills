@@ -17,7 +17,7 @@ metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 
 ## Step 0: 读取共享配置
 
-先读取 `../_shared/user-config.json`，如果 `../_shared/user-config.local.json` 存在，再用它覆盖默认值。
+先读取 `../_shared/user_config.py`，如果 `../_shared/user-config.local.json` 存在，再用它覆盖默认值。
 
 显式生成并在后续统一使用这些变量：
 
@@ -50,7 +50,7 @@ metadata: { "openclaw": { "requires": { "bins": ["python3"], "env": [] } } }
 
 ## 配置来源
 
-- 默认配置在 `../_shared/user-config.json`
+- 默认配置在 `../_shared/user_config.py`
 - 个人覆盖配置放在 `../_shared/user-config.local.json`
 - 如果两者都存在，以 `local` 为准
 

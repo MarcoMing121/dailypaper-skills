@@ -52,7 +52,7 @@ python3 scripts/weave_concepts.py --notes-dir "/path/to/Papers" --concepts-dir "
 
 ```bash
 # 读取共享配置
-cat ../_shared/user-config.json
+cat ../_shared/user_config.py
 ```
 
 获取：

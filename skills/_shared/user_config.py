@@ -12,6 +12,8 @@ DEFAULT_CONFIG = {
         "paper_notes_folder": "论文笔记",
         "daily_papers_folder": "DailyPapers",
         "concepts_folder": "_概念",
+        "search_results_folder": "SearchResults",
+        "social_images_cache": "/tmp/social-images",
         "zotero_db": "~/Zotero/zotero.sqlite",
         "zotero_storage": "~/Zotero/storage",
     },
@@ -104,11 +106,10 @@ def load_user_config() -> dict:
     config = copy.deepcopy(DEFAULT_CONFIG)
     config_dir = Path(__file__).resolve().parent
 
-    for filename in ("user-config.json", "user-config.local.json"):
-        config_path = config_dir / filename
-        if not config_path.exists():
-            continue
-        with config_path.open("r", encoding="utf-8") as f:
+    # Only load local override if exists (optional)
+    local_path = config_dir / "user-config.local.json"
+    if local_path.exists():
+        with local_path.open("r", encoding="utf-8") as f:
             loaded = json.load(f)
         if isinstance(loaded, dict):
             _deep_merge(config, loaded)
@@ -151,6 +152,14 @@ def daily_papers_dir() -> Path:
 def concepts_dir() -> Path:
     # concepts_folder is relative to VAULT root, not paper_notes_dir
     return obsidian_vault_path() / paths_config()["concepts_folder"]
+
+
+def search_results_dir() -> Path:
+    return obsidian_vault_path() / paths_config().get("search_results_folder", "SearchResults")
+
+
+def social_images_cache_dir() -> Path:
+    return Path(paths_config().get("social_images_cache", "/tmp/social-images"))
 
 
 def zotero_db_path() -> Path:

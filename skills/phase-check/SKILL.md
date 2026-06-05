@@ -22,7 +22,7 @@ cat /tmp/current_phase 2>/dev/null || echo "未初始化"
 ### Step 2: 读取配置文件
 
 ```bash
-cat /root/.openclaw/workspaces/paper-agent/dailypaper-skills/_shared/user-config.json
+cat /root/.openclaw/workspaces/paper-agent/dailypaper-skil../_shared/user_config.py
 ```
 
 提取关键字段：

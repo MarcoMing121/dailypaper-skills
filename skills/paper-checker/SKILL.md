@@ -30,7 +30,7 @@ metadata:
 
 ## Step 0: 读取共享配置
 
-与 paper-reader 相同，读取 `../_shared/user-config.json`。
+与 paper-reader 相同，读取 `../_shared/user_config.py`。
 
 ---
 
