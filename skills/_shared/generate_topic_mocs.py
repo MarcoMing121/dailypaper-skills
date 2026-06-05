@@ -6,15 +6,12 @@ Analyzes paper notes and creates cross-category topic pages.
 
 import os
 import re
-import json
+import sys
 from pathlib import Path
 from collections import defaultdict
 
-def load_config():
-    """Load user configuration."""
-    config_path = Path(__file__).parent / "user-config.json"
-    with open(config_path) as f:
-        return json.load(f)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from user_config import obsidian_vault_path, paper_notes_dir, concepts_dir
 
 def extract_paper_metadata(paper_path):
     """Extract metadata from a paper note."""
@@ -78,7 +75,7 @@ def extract_paper_metadata(paper_path):
     
     return metadata
 
-def discover_topics(papers_metadata, config):
+def discover_topics(papers_metadata):
     """Discover topics from paper metadata."""
     # Define topic rules based on tags and keywords
     topic_rules = {
@@ -120,7 +117,7 @@ def discover_topics(papers_metadata, config):
     # Filter topics with at least 2 papers
     return {k: v for k, v in topics.items() if len(v['papers']) >= 2}
 
-def generate_topic_moc(topic_name, topic_data, config):
+def generate_topic_moc(topic_name, topic_data):
     """Generate MOC content for a topic."""
     papers = topic_data['papers']
     description = topic_data['description']
@@ -161,10 +158,9 @@ def generate_topic_moc(topic_name, topic_data, config):
     return '\n'.join(lines)
 
 def main():
-    config = load_config()
-    vault_path = Path(config['VAULT_PATH'])
-    papers_path = Path(config['NOTES_PATH'])
-    moc_path = Path(config.get('TOPIC_MOC_PATH', config['CONCEPTS_PATH'] + '/MOCs'))
+    vault_path = obsidian_vault_path()
+    papers_path = paper_notes_dir()
+    moc_path = concepts_dir() / "MOCs"
     
     # Create MOC directory
     moc_path.mkdir(parents=True, exist_ok=True)
@@ -180,13 +176,13 @@ def main():
     print(f"扫描到 {len(papers_metadata)} 篇论文笔记")
     
     # Discover topics
-    topics = discover_topics(papers_metadata, config)
+    topics = discover_topics(papers_metadata)
     print(f"发现 {len(topics)} 个主题")
     
     # Generate MOCs
     created = 0
     for topic_name, topic_data in topics.items():
-        moc_content = generate_topic_moc(topic_name, topic_data, config)
+        moc_content = generate_topic_moc(topic_name, topic_data)
         moc_file = moc_path / f"{topic_name}.md"
         
         with open(moc_file, 'w', encoding='utf-8') as f:
