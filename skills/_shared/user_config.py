@@ -8,12 +8,12 @@ from pathlib import Path
 
 DEFAULT_CONFIG = {
     "paths": {
-        "obsidian_vault": "~/ObsidianVault",
+        "obsidian_vault": "/root/.openclaw/shared/ObsidianVault",
         "paper_notes_folder": "Papers",
         "daily_papers_folder": "DailyPapers",
         "concepts_folder": "Concepts",
         "search_results_folder": "SearchResults",
-        "social_images_cache": "/tmp/social-images",
+        "social_images_cache": "/root/.openclaw/workspaces/paper-agent/.cache/social-images",
         "zotero_db": "~/Zotero/zotero.sqlite",
         "zotero_storage": "~/Zotero/storage",
     },
@@ -86,8 +86,8 @@ DEFAULT_CONFIG = {
     },
     "automation": {
         "auto_refresh_indexes": True,
-        "git_commit": False,
-        "git_push": False,
+        "git_commit": True,
+        "git_push": True,
     },
 }
 
