@@ -693,7 +693,7 @@ def check_save_path(note_path: Path) -> dict:
     """Check if note is in correct category directory."""
     valid_categories = [
         "1-Continual-Learning", "2-VLA", "3-World-Model",
-        "4-RL-Theory", "5-Deep-Learning", "_Inbox"
+        "4-RL-Theory", "5-Deep-Learning", "7-Robotics", "_Inbox"
     ]
     issues = []
     

@@ -1035,7 +1035,7 @@ Create concept note for {Concept_Name}.
    - 2-Methods/: 方法、算法
    - 3-Architectures/: 模型架构
    - 4-RL/: 强化学习
-   - 5-Robotics/: 机器人相关
+   - 7-Robotics/: 机器人相关
    - 6-Techniques/: 具体技术
    - 7-Datasets/: 数据集
 4. Create file at {CONCEPTS_PATH}/{category}/{Concept_Name}.md
@@ -1080,7 +1080,7 @@ Create concept note for {Concept_Name}.
 | `2-Methods/` | 方法、算法 | Adapter, LoRA, MoE, EWC |
 | `3-Architectures/` | 模型架构 | VLA, CLIP, World-Model |
 | `4-RL/` | 强化学习 | RL, Policy-Learning |
-| `5-Robotics/` | 机器人相关 | Skill-Learning, Robot-Robustness |
+| `7-Robotics/` | 机器人相关 | Skill-Learning, Robot-Robustness |
 | `6-Techniques/` | 具体技术 | Flow-Matching, Diffusion-Policy |
 | `7-Datasets/` | 数据集 | LIBERO, RoboTwin |
 

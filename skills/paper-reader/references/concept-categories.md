@@ -12,7 +12,7 @@
 | `2-Methods/` | 方法、算法、训练策略 | Adapter, LoRA, MoE, EWC, Experience_Replay, Knowledge_Distillation, PackNet |
 | `3-Architectures/` | 模型架构、系统设计 | VLA, CLIP, World-Model, Diffusion_Transformer, LOTUS, MOTUS |
 | `4-RL/` | 强化学习相关 | RL, Policy_Learning, Reward_Modeling, Actor-Critic, PPO |
-| `5-Robotics/` | 机器人相关 | Skill_Learning, Robot_Robustness, Manipulation |
+| `7-Robotics/` | 机器人相关 | Skill_Learning, Robot_Robustness, Manipulation |
 | `6-Techniques/` | 具体技术、实现细节 | Flow_Matching, Diffusion_Policy, Continual_Backpropagation, Autoencoder |
 | `7-Datasets/` | 数据集、benchmark | LIBERO, RoboTwin, Franka_Robot |
 
@@ -27,7 +27,7 @@
     ↓ 否
 是 RL 相关？ → 4-RL/
     ↓ 否
-是机器人相关？ → 5-Robotics/
+是机器人相关？ → 7-Robotics/
     ↓ 否
 是具体技术/算法？ → 2-Methods/ 或 6-Techniques/
     ↓ 否
