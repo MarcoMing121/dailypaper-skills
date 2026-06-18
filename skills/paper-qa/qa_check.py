@@ -191,6 +191,12 @@ def check_formulas(text: str) -> dict:
     # Find all $$ blocks
     formula_blocks = re.findall(r'\$\$(.*?)\$\$', text, re.DOTALL)
     
+    # Also check inline formulas ($...$) for \{ issues
+    inline_formulas = re.findall(r'(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)', text)
+    for j, inline_formula in enumerate(inline_formulas, 1):
+        if r'\{' in inline_formula:
+            issues.append(f"Inline formula {j}: Use \\lbrace/\\rbrace instead of \\{{\\}} (Obsidian inline math incompatible)")
+    
     for i, formula in enumerate(formula_blocks, 1):
         # Check if formula is too long without aligned
         lines = formula.strip().split('\n')
@@ -200,6 +206,8 @@ def check_formulas(text: str) -> dict:
         # Check for common incompatible LaTeX commands
         if r'\bm{' in formula:
             issues.append(f"Formula {i}: Use plain variable instead of \\bm{{}} (Obsidian incompatible)")
+        if r'\{' in formula:
+            issues.append(f"Formula {i}: Use \\lbrace/\\rbrace instead of \\{{\\}} (Obsidian inline math incompatible)")
     
     return {
         "ok": len(issues) == 0,

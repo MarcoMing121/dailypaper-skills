@@ -169,7 +169,7 @@ Final Status: FAILED
 - [x] LaTeX 格式（空行）
 - [x] 公式命名
 - [x] 符号说明
-- [x] LaTeX 兼容性
+- [x] LaTeX 兼容性（`\bm{}`、`\{` vs `\lbrace`）
 
 ### 概念库检查
 - [x] 链接有效性
