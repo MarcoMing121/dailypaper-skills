@@ -18,7 +18,42 @@ metadata:
 
 # Image Check Skill
 
-图片质量检查与 legend 管理。
+**独立的图片质量检查技能**，用另一个模型/session 运行，不与 paper-reader 混合。
+
+## 使用场景
+
+```
+场景 1: paper-reader 刚读完一篇论文，笔记已保存
+  → 单独启动 image-check 验证图片质量
+
+场景 2: 3 天定时提醒，批量检查最近的笔记
+  → 列出待检查笔记 → 逐个运行 image-check
+
+场景 3: 用户手动要求检查某篇笔记的图片
+  → 直接运行 image-check
+```
+
+## 与 paper-reader 的关系
+
+```
+paper-reader (模型 A)          image-check (模型 B)
+    ↓                              ↓
+读论文 → 生成笔记              读原论文 → 提取真实图片
+    ↓                              ↓
+下载图片到 assets/              与笔记对比
+    ↓                              ↓
+生成 legend.md                  生成检查报告
+    ↓                              ↓
+git commit                      CheckResults/{Method}.md
+    ↓
+完成（不调用 image-check）
+```
+
+**关键原则**: 
+- paper-reader **不调用** image-check
+- image-check **独立运行**，可以读取原论文
+- 两个技能可以**并行运行**
+- image-check 可以用**不同的模型**（如更强的视觉模型）来验证
 
 ## 核心功能
 

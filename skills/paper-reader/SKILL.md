@@ -943,7 +943,6 @@ Tags 判断：看 Related Work 小标题 + Abstract 关键词。第一个 tag �
    **Legend 内容**:
    - 每张图片的 ID、来源（local/external）、链接、图例描述
    - 标记哪些图片在笔记中被引用（✅/❌）
-   - 后续 image-check 技能会用此文件做一致性验证
 
 2. 只有在 `AUTO_REFRESH_INDEXES=true` 时才刷新目录页：
    ```bash
@@ -960,6 +959,8 @@ Tags 判断：看 Related Work 小标题 + Abstract 关键词。第一个 tag �
    ```
 
    - 只有在 `GIT_PUSH_ENABLED=true` 且仓库已配置远端时才 push
+
+> ⚠️ **注意**: image-check 是**独立的技能**，用另一个模型/session 运行，不在此流程中自动执行。
 
 ## 5. 概念库维护（每篇论文必做）
 
