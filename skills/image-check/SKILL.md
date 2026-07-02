@@ -167,7 +167,111 @@ paper_path: Papers/{category}/{MethodName}.md
 
 ---
 
-## Step 5: 批量检查（定时任务用）
+## Step 5: 无 Legend 时的自动验证（CRITICAL）
+
+**当论文笔记没有 legend.md 时，image-check 必须自行读取原论文来验证图片质量。**
+
+### 5.1 获取原论文
+
+**优先级**: arXiv HTML > MinerU PDF > 项目主页
+
+```bash
+# 1. 从笔记 frontmatter 提取 arxiv_id 或 url
+ARXIV_ID=$(grep -oP 'arxiv.*?(\d{4}\.\d{4,5})' {note_path} | head -1 | grep -oP '\d{4}\.\d{4,5}')
+
+# 2. 检查 arXiv HTML 是否可用
+curl -sI "https://arxiv.org/html/${ARXIV_ID}" | head -1
+# 如果 200 → 使用 HTML 提取
+# 如果非 200 → 下载 PDF 用 MinerU
+```
+
+### 5.2 提取"真实"图片信息
+
+**方法 A: arXiv HTML 提取（首选）**
+
+```bash
+# 提取所有 figure + caption + image URL
+curl -sL "https://arxiv.org/html/${ARXIV_ID}" | \
+  python3 -c "
+import sys, re
+html = sys.stdin.read()
+figures = re.findall(r'<figure[^>]*>(.*?)</figure>', html, re.DOTALL)
+for i, fig in enumerate(figures, 1):
+    caption = re.search(r'<figcaption[^>]*>(.*?)</figcaption>', fig, re.DOTALL)
+    img = re.search(r'<img[^>]*src=[\"']([^\"']+)[\"']', fig)
+    cap_text = re.sub(r'<[^>]+>', '', caption.group(1)).strip() if caption else 'N/A'
+    img_url = img.group(1) if img else 'N/A'
+    print(f'fig{i}|{img_url}|{cap_text}')
+"
+```
+
+**方法 B: MinerU PDF 提取**
+
+```bash
+# 下载 PDF
+curl -sL "https://arxiv.org/pdf/${ARXIV_ID}.pdf" -o /tmp/paper_verify.pdf
+
+# MinerU 提取
+mineru-open-api extract /tmp/paper_verify.pdf -o /tmp/paper_verify/ -f md,json --language en --model pipeline
+
+# 从 MinerU 输出提取图片和 caption
+ls /tmp/paper_verify/images/
+```
+
+### 5.3 交叉验证
+
+**验证逻辑**:
+
+```
+原论文图片 (HTML/MinerU)
+    ↓ 提取
+真实图片列表 (URL + caption)
+    ↓ 对比
+笔记引用的图片
+    ↓ 检查
+1. 笔记中的图片 URL 是否在原论文中存在？
+2. 原论文的重要图片（Figure 1-N）是否都在笔记中？
+3. 图片 caption 是否与原论文一致？
+```
+
+### 5.4 自动生成 Legend
+
+验证完成后，自动生成 legend.md 保存结果：
+
+```bash
+python3 skills/image-check/scripts/generate_legend.py \
+    --note {note_path} \
+    --assets {assets_dir} \
+    --arxiv {arxiv_id} \
+    --title "{paper_title}"
+```
+
+### 5.5 完整验证流程
+
+```
+输入: 论文笔记 .md（无 legend.md）
+    ↓
+1. 从 frontmatter 提取 arxiv_id
+    ↓
+2. 获取原论文图片（HTML 或 MinerU）
+    ↓
+3. 提取笔记中引用的图片
+    ↓
+4. 交叉验证：
+   - 原论文有 Figure 1-9，笔记引用了几张？
+   - 笔记引用的图片 URL 是否在原论文中？
+   - caption 是否匹配？
+    ↓
+5. 检查本地文件（如果引用了 assets/）
+    ↓
+6. 生成 legend.md
+    ↓
+7. 写入 CheckResults/{Method}.md
+```
+
+---
+
+## Step 6: 批量检查（定时任务用）
 
 ### 获取最近创建的笔记
 

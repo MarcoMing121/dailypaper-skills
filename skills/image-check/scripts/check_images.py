@@ -73,6 +73,124 @@ def load_legend(legend_path: Path) -> list:
     return legends
 
 
+def extract_arxiv_id(text: str) -> str:
+    """Extract arXiv ID from note text (frontmatter or links)."""
+    # From frontmatter
+    match = re.search(r'arxiv.*?(\d{4}\.\d{4,5})', text)
+    if match:
+        return match.group(1)
+    # From URL
+    match = re.search(r'arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})', text)
+    if match:
+        return match.group(1)
+    return ""
+
+
+def fetch_paper_figures_from_html(arxiv_id: str) -> list:
+    """Fetch figure info directly from arXiv HTML."""
+    import subprocess
+    url = f"https://arxiv.org/html/{arxiv_id}"
+    try:
+        result = subprocess.run(
+            ["curl", "-sL", url],
+            capture_output=True, text=True, timeout=30
+        )
+        html = result.stdout
+    except Exception:
+        return []
+
+    figures = []
+    fig_pattern = re.compile(r'<figure[^>]*>(.*?)</figure>', re.DOTALL)
+    img_pattern = re.compile(r'<img[^>]*src=["\']([^"\']+)["\']', re.DOTALL)
+    caption_pattern = re.compile(r'<figcaption[^>]*>(.*?)</figcaption>', re.DOTALL)
+
+    for fig_match in fig_pattern.finditer(html):
+        fig_html = fig_match.group(1)
+        img_match = img_pattern.search(fig_html)
+        img_url = img_match.group(1) if img_match else ""
+        if img_url and not img_url.startswith("http"):
+            img_url = f"https://arxiv.org/html/{arxiv_id}/{img_url}"
+
+        filename = Path(img_url).stem if img_url else ""
+        ext = Path(img_url).suffix if img_url else ".png"
+
+        cap_match = caption_pattern.search(fig_html)
+        caption = re.sub(r'<[^>]+>', '', cap_match.group(1)).strip() if cap_match else ""
+
+        if filename:
+            figures.append({
+                "id": filename,
+                "url": img_url,
+                "caption": caption[:200],
+                "filename": f"{filename}{ext}",
+            })
+
+    return figures
+
+
+def verify_against_paper(note_path: Path, vault_path: Path) -> dict:
+    """Verify note images against the original paper (no legend needed)."""
+    note_text = note_path.read_text(encoding="utf-8")
+    arxiv_id = extract_arxiv_id(note_text)
+
+    if not arxiv_id:
+        return {"ok": False, "detail": "No arXiv ID found in note", "figures": []}
+
+    # Fetch real figures from paper
+    paper_figures = fetch_paper_figures_from_html(arxiv_id)
+    if not paper_figures:
+        return {"ok": False, "detail": f"Could not fetch HTML for {arxiv_id}", "figures": []}
+
+    # Extract note references
+    note_urls = set()
+    for match in re.finditer(r'!\[[^\]]*\]\((https?://[^)]+)\)', note_text):
+        note_urls.add(match.group(1))
+    note_stems = set()
+    for match in re.finditer(r'!\[\[([^\]|]+?)(?:\|\d+)?\]\]', note_text):
+        note_stems.add(Path(match.group(1)).stem)
+
+    # Cross-verify
+    paper_url_map = {f["url"]: f for f in paper_figures}
+    paper_stem_map = {f["id"]: f for f in paper_figures}
+
+    matched = []
+    unmatched_note = []
+    missing_from_note = []
+
+    for url in note_urls:
+        if url in paper_url_map:
+            matched.append(paper_url_map[url])
+        else:
+            # Try stem match
+            stem = Path(url).stem
+            if stem in paper_stem_map:
+                matched.append(paper_stem_map[stem])
+            else:
+                unmatched_note.append(url)
+
+    for stem in note_stems:
+        if stem not in paper_stem_map and stem not in [m["id"] for m in matched]:
+            # Check if it's a local file reference
+            pass
+
+    # Find important figures missing from note
+    for fig in paper_figures:
+        if fig not in matched:
+            if fig["id"] not in note_stems and fig["url"] not in note_urls:
+                missing_from_note.append(fig)
+
+    return {
+        "ok": len(unmatched_note) == 0,
+        "arxiv_id": arxiv_id,
+        "paper_figures": len(paper_figures),
+        "note_refs": len(note_urls) + len(note_stems),
+        "matched": len(matched),
+        "unmatched_note": unmatched_note,
+        "missing_from_note": [f["id"] for f in missing_from_note[:10]],  # limit
+        "figures": paper_figures,
+    }
+
+
 def check_images(note_path: Path, vault_path: Path) -> dict:
     """Run all image checks."""
     method_name = note_path.stem
@@ -178,10 +296,35 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
             "detail": f"Not in legend: {unmatched}" if unmatched else "All references match",
         }
     else:
-        checks["reference_match"] = {
-            "ok": False,
-            "detail": "No legend to compare against",
-        }
+        # No legend — verify against original paper
+        paper_verify = verify_against_paper(note_path, vault_path)
+        if paper_verify["ok"]:
+            checks["reference_match"] = {
+                "ok": True,
+                "detail": f"Verified against paper: {paper_verify['matched']}/{paper_verify['paper_figures']} figures matched",
+            }
+            # Auto-generate legend from paper data
+            if paper_verify.get("figures"):
+                try:
+                    from generate_legend import main as gen_legend
+                    # Will be generated separately
+                except ImportError:
+                    pass
+            checks["paper_verify"] = {
+                "ok": len(paper_verify.get("unmatched_note", [])) == 0,
+                "detail": f"Paper has {paper_verify['paper_figures']} figures, note refs {paper_verify['note_refs']}, "
+                          f"matched {paper_verify['matched']}, "
+                          f"missing from note: {paper_verify.get('missing_from_note', [])}",
+            }
+        else:
+            checks["reference_match"] = {
+                "ok": False,
+                "detail": paper_verify.get("detail", "No legend and cannot verify against paper"),
+            }
+            checks["paper_verify"] = {
+                "ok": False,
+                "detail": paper_verify.get("detail", "Could not fetch original paper"),
+            }
     
     # Stats
     stats = {
@@ -278,6 +421,7 @@ def main():
     parser.add_argument("--vault", help="Vault path (auto-detected if not provided)")
     parser.add_argument("--json", action="store_true", help="Output JSON")
     parser.add_argument("--write", action="store_true", help="Write result to CheckResults/")
+    parser.add_argument("--generate-legend", action="store_true", help="Auto-generate legend if missing")
     
     args = parser.parse_args()
     
@@ -301,6 +445,21 @@ def main():
     if args.write:
         output = write_check_result(vault_path, result)
         print(f"\n📄 Report written to: {output}")
+    
+    # Auto-generate legend if requested and missing
+    if args.generate_legend and not Path(result["legend_path"]).exists():
+        note_text = Path(args.note).read_text(encoding="utf-8")
+        arxiv_id = extract_arxiv_id(note_text)
+        if arxiv_id:
+            print(f"\n📝 Generating legend for {arxiv_id}...")
+            import subprocess
+            subprocess.run([
+                sys.executable,
+                str(Path(__file__).parent / "generate_legend.py"),
+                "--note", args.note,
+                "--assets", result["assets_dir"],
+                "--arxiv", arxiv_id,
+            ])
     
     sys.exit(0 if result["status"] == "passed" else 1)
 
