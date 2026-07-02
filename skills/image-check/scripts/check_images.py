@@ -723,6 +723,89 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
                 "detail": paper_verify.get("detail", "Could not fetch original paper"),
             }
     
+    # === Auto-generate legend when missing ===
+    legend_generated = False
+    if not legend_path.exists() and paper_verify.get("ok"):
+        # Generate legend from paper verification data
+        try:
+            arxiv_id = paper_verify.get("arxiv_id", "")
+            note_text = note_path.read_text(encoding="utf-8")
+            title_match = re.search(r'^title:\s*["\']?(.+?)["\']?\s*$', note_text, re.MULTILINE)
+            title = title_match.group(1) if title_match else method_name
+            
+            # Build legend from paper figures
+            legend_lines = [
+                f"# Image Legends: {title}",
+                "",
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} (by image-check)",
+                f"Source: {paper_verify.get('source', 'unknown')}",
+                "",
+                "| ID | Source | Link | Legend | Used in Note |",
+                "|----|--------|------|--------|--------------|",
+            ]
+            
+            # Get note image references for "Used" column
+            note_urls = set()
+            for match in re.finditer(r'!\[[^\]]*\]\((https?://[^)]+)\)', note_text):
+                note_urls.add(match.group(1))
+            note_stems = set()
+            for match in re.finditer(r'!\[\[([^\]|]+?)(?:\|\d+)?\]\]', note_text):
+                note_stems.add(Path(match.group(1)).stem)
+            
+            for fig in paper_verify.get("figures", []):
+                fig_id = fig.get("id", "unknown")
+                caption = fig.get("caption", "N/A").replace("|", "\\|")[:200]
+                url = fig.get("url", "")
+                local_path = fig.get("local_path", "")
+                
+                # Determine source and link
+                if url:
+                    source = "external"
+                    link = f"![]({url})"
+                    used = "✅" if url in note_urls or fig_id in note_stems else "❌"
+                elif local_path:
+                    source = "local"
+                    link = f"![[{assets_dir.name}/{fig.get('filename', '')}]]"
+                    used = "✅" if fig_id in note_stems else "❌"
+                else:
+                    source = "unknown"
+                    link = "N/A"
+                    used = "❌"
+                
+                legend_lines.append(f"| {fig_id} | {source} | {link} | {caption} | {used} |")
+            
+            # Write legend
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            legend_path.write_text("\n".join(legend_lines), encoding="utf-8")
+            legend_generated = True
+            
+            # Reload legends after generation
+            legends = load_legend(legend_path)
+            
+            # Update legend_exists check
+            checks["legend_exists"] = {
+                "ok": True,
+                "detail": f"Auto-generated from {paper_verify.get('source', '?')}: {legend_path}",
+            }
+            # Update legend_complete check
+            no_legend = [l for l in legends if not l["legend"] or l["legend"] == "N/A"]
+            checks["legend_complete"] = {
+                "ok": len(no_legend) == 0,
+                "detail": f"Auto-generated with {len(legends)} entries" if not no_legend 
+                          else f"{len(no_legend)} entries missing caption",
+            }
+        except Exception as e:
+            checks["legend_generated"] = {
+                "ok": False,
+                "detail": f"Failed to generate legend: {e}",
+            }
+    
+    if legend_generated:
+        checks["legend_generated"] = {
+            "ok": True,
+            "detail": f"Auto-generated legend from {paper_verify.get('source', '?')} with {len(legends)} figures",
+        }
+    
     # Stats
     stats = {
         "note_local_images": len(note_images["local"]),
