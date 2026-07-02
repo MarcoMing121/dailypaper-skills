@@ -3,12 +3,13 @@ name: image-check
 description: |
   Verify that images in paper notes match their legends and are correctly referenced.
   Use when: "check images", "verify figures", "图片检查", "检查图片", "image quality check".
-  Also triggers after paper-reader creates a note (auto-QA).
 
   Features:
-  - Generate image legend files (legend.md) for each paper
-  - Cross-check: note references ↔ legend ↔ actual image files
-  - Support MinerU/HTML image extraction for verification
+  - Check/generate image legend files (legend.md) for each paper
+  - Read original paper (HTML/MinerU) when legend is missing or incomplete
+  - Use vision model to verify caption ↔ image match
+  - Fill missing captions using vision model
+  - Cross-check: note references ↔ legend
   - Write check results to vault root CheckResults/
 metadata:
   {
@@ -36,55 +37,120 @@ metadata:
 ## 与 paper-reader 的关系
 
 ```
-paper-reader (模型 A)          image-check (模型 B)
-    ↓                              ↓
-读论文 → 生成笔记              读原论文 → 提取真实图片
-    ↓                              ↓
-下载图片到 assets/              与笔记对比
-    ↓                              ↓
-生成 legend.md                  生成检查报告
-    ↓                              ↓
-git commit                      CheckResults/{Method}.md
-    ↓
-完成（不调用 image-check）
+paper-reader (模型 A)              image-check (模型 B，独立运行)
+    ↓                                  ↓
+读论文 → 生成笔记 + legend.md        legend.md 存在？
+    ↓                                  ├─ 是 → 检查缺失 caption
+git commit                            └─ 否 → 读原论文生成 legend
+    ↓                                      ↓
+完成                                 视觉模型验证 caption ↔ 图片
+                                     （缺失 caption → 视觉模型补充）
+                                          ↓
+                                     检查笔记引用 ↔ legend 匹配
+                                          ↓
+                                     写入 CheckResults/{Method}.md
 ```
 
 **关键原则**: 
 - paper-reader **不调用** image-check
 - image-check **独立运行**，可以读取原论文
 - 两个技能可以**并行运行**
-- image-check 可以用**不同的模型**（如更强的视觉模型）来验证
+- image-check 用**视觉模型**来验证/补充 caption
 
 ---
 
-## ⚠️ 视觉验证（可选，用视觉模型"看"图片）
-
-**当前检查只验证文件/链接，不验证图片内容。** 为了真正"看"图片，可以用视觉模型。
-
-### 触发方式
+## 完整流程（3 步）
 
 ```
-检查一下 HOVER 的图片（用视觉模型验证）
-→ 运行 image-check + 视觉验证
-```
-
-### 流程
-
-```
-image-check 常规检查完成
+Step 1: Legend 检查与生成
     ↓
-有视觉模型可用？
-  ├─ 是 → 对每张图片执行视觉验证
-  │       ├─ 读取图片文件
-  │       ├─ 发送给视觉模型 + caption
-  │       ├─ 模型判断：caption 是否准确？图片是否清晰？
-  │       └─ 返回验证结果
-  └─ 否 → 跳过视觉验证
+    legend.md 存在？
+      ├─ 是 → 读取 legend，检查缺失 caption
+      └─ 否 → 从原论文提取
+              ├─ arXiv HTML → <figure> + <figcaption>
+              └─ MinerU PDF → 提取图片 + caption
+              ↓
+              生成 legend.md
+
+Step 2: 视觉验证 + caption 补充
     ↓
-写入 CheckResults/{Method}.md
+    对每张图片：
+      ├─ 读取图片文件（或下载外链图片）
+      ├─ 发送给视觉模型 + 现有 caption
+      ├─ 视觉模型判断：
+      │   ├─ caption 存在且准确 → ✅ 通过
+      │   ├─ caption 存在但不准确 → 修正 caption
+      │   └─ caption 缺失 → 生成新 caption
+      └─ 更新 legend.md
+
+Step 3: 一致性检查
+    ↓
+    ├─ 笔记引用 ↔ legend 匹配？
+    ├─ legend 中所有图片都有 caption？
+    ├─ 外链可达？（HTTP HEAD）
+    └─ 本地文件存在 + 大小合理？
+    ↓
+    写入 CheckResults/{Method}.md
 ```
 
-### 视觉验证脚本
+---
+
+## Step 1: Legend 检查与生成
+
+### 1.1 Legend 文件格式
+
+每篇论文在 `assets/{MethodName}/` 目录下有一个 `legend.md`：
+
+```markdown
+# Image Legends: {Paper Title}
+
+Generated: 2026-07-02 14:00
+Source: html / mineru
+
+| ID | Source | Link | Legend | Used in Note |
+|----|--------|------|--------|--------------|
+| x1 | external | ![](https://arxiv.org/html/xxx/x1.png) | 系统架构概览 | ✅ |
+| x2 | external | ![](https://arxiv.org/html/xxx/x2.png) | 待补充 | ✅ |
+| x3 | local | ![[Method/x3.png]] | 实验结果 | ❌ |
+```
+
+**字段说明**:
+- **ID**: 图片标识（文件名 stem）
+- **Source**: `external`（外部 URL）或 `local`（已下载到 assets）
+- **Link**: Obsidian wikilink `![[...]]` 或 Markdown 外链 `![](url)`
+- **Legend**: 图片描述（"待补充" = 需要视觉模型填充）
+- **Used in Note**: 是否在笔记中被引用
+
+### 1.2 生成流程
+
+```bash
+# 使用 arXiv HTML
+python3 scripts/generate_legend.py \
+    --note /path/to/note.md \
+    --assets /path/to/assets/Method \
+    --arxiv 2506.09366 \
+    --title "Paper Title"
+
+# 使用 MinerU PDF（HTML 不可用时）
+python3 scripts/generate_legend.py \
+    --note /path/to/note.md \
+    --assets /path/to/assets/Method \
+    --title "Paper Title"
+```
+
+**Legend 来源优先级**:
+1. arXiv HTML `<figcaption>` → 最完整
+2. MinerU Markdown → 图片引用中的 caption
+3. 论文正文中的 "Figure X" 描述段落
+4. 视觉模型生成（Step 2）
+
+---
+
+## Step 2: 视觉验证 + caption 补充
+
+### 2.1 视觉模型验证
+
+对 legend 中每张图片：
 
 ```bash
 # 准备验证数据
@@ -94,7 +160,7 @@ python3 scripts/verify_image_visual.py \
     --title "SkillBlender"
 ```
 
-**输出 JSON**:
+**输出 JSON**（供视觉模型使用）:
 ```json
 {
   "ok": true,
@@ -106,171 +172,75 @@ python3 scripts/verify_image_visual.py \
 }
 ```
 
+### 2.2 视觉模型判断
+
 **调用方（agent）拿到 JSON 后**:
 1. 读取 `image_base64` 显示图片给视觉模型
 2. 发送 `prompt` 给视觉模型
-3. 解析模型返回的 JSON 结果
-4. 记录到检查报告
+3. 解析模型返回的结果
 
-### 视觉验证检查项
+**三种情况**:
+| caption 状态 | 视觉模型动作 | 结果 |
+|-------------|-------------|------|
+| 存在且准确 | 验证通过 | ✅ |
+| 存在但不准确 | 修正 caption | 更新 legend.md |
+| 缺失（"待补充"） | 生成新 caption | 填充 legend.md |
 
-| 检查 | 说明 |
-|------|------|
-| caption_accurate | caption 是否准确描述了图片内容 |
-| image_readable | 图片是否清晰可读（非损坏/模糊/空白） |
-| is_paper_figure | 是否是论文中的图片（非无关图片） |
+### 2.3 更新 legend.md
 
-## 核心功能
-
-1. **Legend 生成**: 为每篇论文创建 `legend.md`，记录所有图片的链接+描述
-2. **一致性检查**: 验证笔记引用 ↔ legend ↔ 实际图片文件三者匹配
-3. **外链可达性**: 检查笔记中使用的外部图片链接是否仍然有效（HTTP 200）
-4. **原论文验证（仅当无 legend 时）**: 从原论文提取真实图片信息，与笔记对比
-5. **检查报告**: 通过的检查写入 `CheckResults/{MethodName}.md`
-
----
-
-## 工作流程
-
-```
-输入: 论文笔记 .md
-    ↓
-legend.md 存在？
-  ├─ 是 → 直接用 legend 做一致性检查
-  │       ↓
-  │       检查外链可达性（HTTP HEAD）
-  │       ↓
-  │       检查笔记引用 ↔ legend 匹配
-  │       ↓
-  │       检查本地文件存在 + 大小
-  │
-  └─ 否 → 从原论文提取（HTML/MinerU）
-          ↓
-          生成 legend.md
-          ↓
-          同上检查
-    ↓
-写入 CheckResults/{Method}.md
-```
-
----
-
-## Step 1: Legend 文件格式
-
-每篇论文在 `assets/{MethodName}/` 目录下有一个 `legend.md`：
-
-```markdown
-# Image Legends: {Paper Title}
-
-Generated: 2026-07-02 14:00
-
-| ID | Source | Link | Legend | Used in Note |
-|----|--------|------|--------|--------------|
-| x1 | external | ![](https://arxiv.org/html/2506.09366/x1.png) | 系统架构概览 | ✅ |
-| x2 | external | ![](https://arxiv.org/html/2506.09366/x2.png) | 模型架构图 | ✅ |
-| x3 | local | ![[SkillBlender/x3.png]] | SkillBench 基准 | ✅ |
-```
-
-**字段说明**:
-- **ID**: 图片标识（文件名 stem）
-- **Source**: `external`（外部 URL）或 `local`（已下载到 assets）
-- **Link**: Obsidian wikilink `![[...]]` 或 Markdown 外链 `![](url)`
-- **Legend**: 图片描述/图例（从论文提取）
-- **Used in Note**: 是否在笔记中被引用
-
----
-
-## Step 2: Legend 生成流程
-
-### 2.1 从论文提取 legend
-
-**方法 A: arXiv HTML（首选）**
-
-```bash
-# 从 HTML 提取 figure + caption
-curl -sL "https://arxiv.org/html/{arxiv_id}" | \
-  python3 -c "
-import sys, re
-html = sys.stdin.read()
-figures = re.findall(r'<figure[^>]*>(.*?)</figure>', html, re.DOTALL)
-for i, fig in enumerate(figures, 1):
-    caption = re.search(r'<figcaption[^>]*>(.*?)</figcaption>', fig, re.DOTALL)
-    img = re.search(r'<img[^>]*src=[\"']([^\"']+)[\"']', fig)
-    cap_text = re.sub(r'<[^>]+>', '', caption.group(1)).strip() if caption else 'N/A'
-    img_url = img.group(1) if img else 'N/A'
-    print(f'fig{i}|{img_url}|{cap_text}')
-"
-```
-
-**方法 B: MinerU PDF 提取**
-
-MinerU 自动提取的图片在 `images/` 目录，legend 从论文 Markdown 中的 figure caption 段落提取。
-
-**方法 C: 手动补充**
-
-如果自动提取失败，从论文 PDF 中手动复制 figure caption。
-
-### 2.2 生成 legend.md
-
-```python
-def generate_legend(method_name, paper_title, figures):
-    """
-    figures: list of dict with keys: id, source, link, caption
-    """
-    lines = [
-        f"# Image Legends: {paper_title}",
-        "",
-        "| ID | Source | Link | Legend | Used in Note |",
-        "|----|--------|------|--------|--------------|",
-    ]
-    for fig in figures:
-        lines.append(
-            f"| {fig['id']} | {fig['source']} | {fig['link']} | {fig['caption']} | ❌ |"
-        )
-    return "\n".join(lines)
-```
+视觉验证完成后，更新 legend.md 中的 caption：
+- 修正不准确的 caption
+- 填充 "待补充" 的 caption
+- 标记验证状态
 
 ---
 
 ## Step 3: 一致性检查
 
-### 3.1 三向匹配检查
-
-```bash
-# 1. 从笔记提取引用的图片
-grep -oP '!\[\[([^\]|]+)(?:\|[0-9]+)?\]\]' {note_path} | sed 's/!\[\[//; s/\|[0-9]*//; s/\]\]//'
-grep -oP '!\[([^\]]*)\]\((https?://[^)]+)\)' {note_path}
-
-# 2. 从 legend.md 提取记录的图片
-# 3. 从 assets/ 目录提取实际存在的文件
-ls {vault}/assets/{method_name}/
-
-# 4. 三向对比
-```
-
-### 3.2 检查项
+### 3.1 检查项
 
 | 检查 | 说明 | 结果 |
 |------|------|------|
-| **引用存在** | 笔记中引用的图片在 legend 中有记录 | ✅/❌ |
-| **文件存在** | legend 中 local 类型的图片在 assets/ 中存在 | ✅/❌ |
-| **文件大小** | 图片文件 > 10KB（不是空文件或损坏） | ✅/❌ |
-| **格式正确** | 图片格式为 jpg/png/gif/webp | ✅/❌ |
-| **legend 完整** | 所有图片都有 legend 描述 | ✅/❌ |
-| **引用完整** | legend 中标记 Used 的图片确实在笔记中被引用 | ✅/❌ |
+| **legend_exists** | legend.md 是否存在 | ✅/❌ |
+| **local_files_exist** | 本地文件是否完整 | ✅/❌ |
+| **file_sizes** | 文件大小 > 10KB | ✅/❌ |
+| **legend_complete** | 所有图片都有 caption（非"待补充"） | ✅/❌ |
+| **external_links** | 外链可达（HTTP HEAD） | ✅/❌ |
+| **reference_match** | 笔记引用 ↔ legend 匹配 | ✅/❌ |
+
+### 3.2 外链检查
+
+```bash
+# 对笔记中的每个外部图片链接
+curl -sI -o /dev/null -w "%{http_code}" "https://arxiv.org/html/xxx/x1.png"
+# 期望 200
+```
+
+### 3.3 引用匹配
+
+```python
+# 从笔记提取引用
+note_refs = extract_refs(note_text)  # ['x1', 'x2', ...]
+
+# 从 legend 提取
+legend_ids = [l['id'] for l in legends]
+
+# 对比
+unmatched = set(note_refs) - set(legend_ids)
+```
 
 ---
 
-## Step 4: 检查报告
+## 检查报告
 
 通过的检查写入 `{VAULT_PATH}/CheckResults/{MethodName}.md`：
 
 ```markdown
 ---
 title: "Image Check: {MethodName}"
-date: {YYYY-MM-DD HH:MM}
-status: passed | failed
-paper_path: Papers/{category}/{MethodName}.md
+date: 2026-07-02 14:50
+status: passed
+paper_path: Papers/7-Robotics/Method.md
 ---
 
 # Image Check Report: {MethodName}
@@ -279,193 +249,13 @@ paper_path: Papers/{category}/{MethodName}.md
 
 | 检查项 | 状态 | 详情 |
 |--------|------|------|
-| 引用存在 | ✅ | 9/9 图片在 legend 中有记录 |
-| 文件存在 | ✅ | 9/9 本地文件存在 |
-| 文件大小 | ✅ | 所有文件 > 10KB |
-| legend 完整 | ✅ | 所有图片有描述 |
-
-## 图片列表
-
-| ID | 状态 | Legend |
-|----|------|--------|
-| fig1 | ✅ | 系统架构概览 |
-| fig2 | ✅ | 模型架构图 |
-...
-```
-
----
-
-## Step 5: 无 Legend 时的自动验证（CRITICAL）
-
-**当论文笔记没有 legend.md 时，image-check 必须自行读取原论文来验证图片质量。**
-
-### 5.1 获取原论文（与 paper-reader 相同的提取流程）
-
-**image-check 使用与 paper-reader 完全相同的提取流程**：
-
-```
-获取原论文
-    ↓
-arXiv HTML 可用？
-  ├─ 行数 ≤ 500 → 直接提取 figure + caption
-  ├─ 行数 > 500 → 分块（300行/块）→ 逐块提取 → 合并
-  └─ 不可用 → 降级到 MinerU
-                ├─ PDF < 1MB → 直接 MinerU 提取
-                └─ PDF ≥ 1MB → split_pdf_for_mineru.sh 分割 → 逐块 MinerU → 合并
-```
-
-```bash
-# 1. 从笔记 frontmatter 提取 arxiv_id 或 url
-ARXIV_ID=$(grep -oP 'arxiv.*?(\d{4}\.\d{4,5})' {note_path} | head -1 | grep -oP '\d{4}\.\d{4,5}')
-
-# 2. 检查 arXiv HTML 是否可用
-curl -sI "https://arxiv.org/html/${ARXIV_ID}" | head -1
-```
-
-### 5.2 提取"真实"图片信息
-
-**方法 A: arXiv HTML 提取（首选，速度快）**
-
-与 paper-reader 相同：
-- 小文件（≤500 行）：直接提取 `<figure>` + `<figcaption>`
-- 大文件（>500 行）：分 300 行/块，逐块提取后合并
-
-```bash
-# 提取所有 figure + caption + image URL
-curl -sL "https://arxiv.org/html/${ARXIV_ID}" | \
-  python3 -c "
-import sys, re
-html = sys.stdin.read()
-figures = re.findall(r'<figure[^>]*>(.*?)</figure>', html, re.DOTALL)
-for i, fig in enumerate(figures, 1):
-    caption = re.search(r'<figcaption[^>]*>(.*?)</figcaption>', fig, re.DOTALL)
-    img = re.search(r'<img[^>]*src=[\"']([^\"']+)[\"']', fig)
-    cap_text = re.sub(r'<[^>]+>', '', caption.group(1)).strip() if caption else 'N/A'
-    img_url = img.group(1) if img else 'N/A'
-    print(f'fig{i}|{img_url}|{cap_text}')
-"
-```
-
-**方法 B: MinerU PDF 提取（HTML 不可用时自动降级）**
-
-与 paper-reader 完全相同的流程：
-1. 下载 PDF
-2. 检查大小 → ≥1MB 则用 `split_pdf_for_mineru.sh` 分割
-3. 逐个 chunk 调用 `mineru-open-api extract`
-4. 合并图片和 Markdown
-5. 从 Markdown 提取 figure caption
-
-```bash
-# 完整流程（自动）
-python3 check_images.py --note /path/to/note.md --generate-legend
-```
-
-**MinerU 优势**:
-- 表格识别（HTML 中表格可能是图片）
-- 公式识别（LaTeX 格式输出）
-- 支持所有 PDF（不依赖 arXiv HTML 可用性）
-- 大 PDF 自动分割（复用 paper-reader 的 split 脚本）
-
-**自动降级逻辑**:
-```
-arXiv HTML 可用？
-  ├─ 是 → 提取图片
-  │       图片数量 ≥ 2？
-  │         ├─ 是 → 使用 HTML 结果 ✅
-  │         └─ 否 → 降级到 MinerU 🔄
-  └─ 否 → 直接 MinerU 🔄
-```
-
-### 5.3 交叉验证
-
-**验证逻辑**:
-
-```
-原论文图片 (HTML/MinerU)
-    ↓ 提取
-真实图片列表 (URL + caption)
-    ↓ 对比
-笔记引用的图片
-    ↓ 检查
-1. 笔记中的图片 URL 是否在原论文中存在？
-2. 原论文的重要图片（Figure 1-N）是否都在笔记中？
-3. 图片 caption 是否与原论文一致？
-```
-
-### 5.4 自动生成 Legend
-
-验证完成后，自动生成 legend.md 保存结果：
-
-```bash
-python3 skills/image-check/scripts/generate_legend.py \
-    --note {note_path} \
-    --assets {assets_dir} \
-    --arxiv {arxiv_id} \
-    --title "{paper_title}"
-```
-
-### 5.5 完整验证流程
-
-```
-输入: 论文笔记 .md（无 legend.md）
-    ↓
-1. 从 frontmatter 提取 arxiv_id
-    ↓
-2. 获取原论文图片（HTML 或 MinerU）
-    ↓
-3. 提取笔记中引用的图片
-    ↓
-4. 交叉验证：
-   - 原论文有 Figure 1-9，笔记引用了几张？
-   - 笔记引用的图片 URL 是否在原论文中？
-   - caption 是否匹配？
-    ↓
-5. 检查本地文件（如果引用了 assets/）
-    ↓
-6. 生成 legend.md
-    ↓
-7. 写入 CheckResults/{Method}.md
-```
-
----
-
-## Step 6: 批量检查（定时任务用）
-
-### 获取最近创建的笔记
-
-```python
-from pathlib import Path
-from datetime import datetime
-
-def get_recent_notes(vault_path, limit=10):
-    """获取最近创建的论文笔记，按日期降序"""
-    notes_dir = Path(vault_path) / "Papers"
-    notes = []
-    for md in notes_dir.rglob("*.md"):
-        if md.name.startswith("_"):
-            continue
-        stat = md.stat()
-        notes.append({
-            "path": md,
-            "created": datetime.fromtimestamp(stat.st_ctime),
-            "name": md.stem
-        })
-    notes.sort(key=lambda x: x["created"], reverse=True)
-    return notes[:limit]
-```
-
-### 检查状态
-
-```python
-def needs_check(vault_path, method_name):
-    """判断是否需要检查"""
-    check_file = Path(vault_path) / "CheckResults" / f"{method_name}.md"
-    if not check_file.exists():
-        return True
-    # 检查是否笔记有更新
-    note_mtime = ...  # 获取笔记修改时间
-    check_mtime = datetime.fromtimestamp(check_file.stat().st_mtime)
-    return note_mtime > check_mtime
+| legend_exists | ✅ | Auto-generated from html |
+| local_files_exist | ✅ | All local files exist |
+| file_sizes | ✅ | All files > 10KB |
+| legend_complete | ✅ | All captions filled (vision verified) |
+| external_links | ✅ | All 9 external links reachable |
+| reference_match | ✅ | All references match |
+| visual_verify | ✅ | 9/9 images verified |
 ```
 
 ---
@@ -475,33 +265,32 @@ def needs_check(vault_path, method_name):
 ### 单篇检查
 
 ```
-检查一下 SkillBlender 的图片
-→ 运行 image-check 流程
+检查一下 HOVER 的图片
+→ 运行 image-check
+```
+
+### 视觉验证
+
+```
+检查 HOVER 的图片（用视觉模型验证）
+→ 运行 image-check + 视觉模型
 ```
 
 ### 批量检查（定时任务）
 
 ```
-提醒我检查最近的论文笔记图片
-→ 获取 top 10 最近笔记
-→ 列出需要检查的
-→ 提醒用户
+3 天定时提醒
+→ list_need_check.py --limit 10
+→ 发送到 #paper-research 提醒用户
 ```
 
 ---
 
-## 与 paper-reader 的集成
+## 脚本列表
 
-paper-reader 在保存笔记后应自动：
-1. 生成 `assets/{MethodName}/legend.md`
-2. 将 legend 信息嵌入笔记的图表章节
-
-### Legend 生成脚本
-
-```bash
-# 在 paper-reader 流程末尾调用
-python3 skills/image-check/scripts/generate_legend.py \
-    --note {note_path} \
-    --assets {assets_dir} \
-    --output {assets_dir}/legend.md
-```
+| 脚本 | 用途 |
+|------|------|
+| `scripts/generate_legend.py` | 生成 legend.md（从 HTML/MinerU） |
+| `scripts/check_images.py` | 一致性检查（文件/链接/引用） |
+| `scripts/verify_image_visual.py` | 准备视觉验证数据 |
+| `scripts/list_need_check.py` | 列出待检查笔记 |
