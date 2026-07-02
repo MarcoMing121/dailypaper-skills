@@ -926,18 +926,37 @@ Tags 判断：看 Related Work 小标题 + Abstract 关键词。第一个 tag �
 
 ### 保存后自动执行
 
-1. 只有在 `AUTO_REFRESH_INDEXES=true` 时才刷新目录页：
+1. **生成图片 Legend（每篇论文必做）**：
+
+   笔记保存后，立即为该论文生成 `legend.md`，记录所有图片的链接和描述：
+
+   ```bash
+   python3 skills/image-check/scripts/generate_legend.py \
+       --note {NOTES_PATH}/{category}/{MethodName}.md \
+       --assets {ASSETS_PATH} \
+       --arxiv {arxiv_id} \
+       --title "{论文标题}"
+   ```
+
+   **Legend 文件位置**: `{ASSETS_PATH}/legend.md`
+
+   **Legend 内容**:
+   - 每张图片的 ID、来源（local/external）、链接、图例描述
+   - 标记哪些图片在笔记中被引用（✅/❌）
+   - 后续 image-check 技能会用此文件做一致性验证
+
+2. 只有在 `AUTO_REFRESH_INDEXES=true` 时才刷新目录页：
    ```bash
    python3 ../_shared/generate_concept_mocs.py
    python3 ../_shared/generate_paper_mocs.py
    ```
-2. 只有在 `GIT_COMMIT_ENABLED=true` 时才做 git：
+3. 只有在 `GIT_COMMIT_ENABLED=true` 时才做 git：
    - 先确认 `VAULT_PATH/.git` 存在
    - `git add {新增文件} {paper_notes_folder}/` 后必须真的有 staged changes
    - 满足条件后再执行：
 
    ```bash
-   cd {VAULT_PATH} && git add {新增文件} {paper_notes_folder}/ && git commit -m "add paper note: {方法名}"
+   cd {VAULT_PATH} && git add {新增文件} {paper_notes_folder}/ assets/ && git commit -m "add paper note: {方法名}"
    ```
 
    - 只有在 `GIT_PUSH_ENABLED=true` 且仓库已配置远端时才 push
