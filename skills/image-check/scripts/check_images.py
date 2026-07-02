@@ -123,23 +123,142 @@ def fetch_paper_figures_from_html(arxiv_id: str) -> list:
                 "url": img_url,
                 "caption": caption[:200],
                 "filename": f"{filename}{ext}",
+                "source": "html",
             })
 
     return figures
 
 
+def fetch_paper_figures_from_mineru(arxiv_id: str) -> list:
+    """Fetch figure info from MinerU PDF extraction."""
+    import subprocess
+
+    pdf_path = Path(f"/tmp/paper_verify_{arxiv_id}.pdf")
+    mineru_dir = Path(f"/tmp/paper_verify_mineru_{arxiv_id}")
+
+    # Download PDF
+    try:
+        subprocess.run(
+            ["curl", "-sL", f"https://arxiv.org/pdf/{arxiv_id}.pdf", "-o", str(pdf_path)],
+            capture_output=True, timeout=60
+        )
+    except Exception:
+        return []
+
+    if not pdf_path.exists() or pdf_path.stat().st_size < 1000:
+        return []
+
+    pdf_size_mb = pdf_path.stat().st_size / (1024 * 1024)
+
+    # Split if needed (reuse paper-reader's split script)
+    split_script = Path(__file__).parent.parent.parent / "paper-reader" / "scripts" / "split_pdf_for_mineru.sh"
+
+    if pdf_size_mb >= 1 and split_script.exists():
+        chunks_dir = Path(f"/tmp/paper_verify_chunks_{arxiv_id}")
+        try:
+            subprocess.run(
+                ["bash", str(split_script), str(pdf_path), str(chunks_dir)],
+                capture_output=True, timeout=120
+            )
+            # Process each chunk
+            mineru_dir.mkdir(parents=True, exist_ok=True)
+            (mineru_dir / "images").mkdir(exist_ok=True)
+
+            for chunk in sorted(chunks_dir.glob("chunk_*.pdf")):
+                chunk_dir = mineru_dir / chunk.stem
+                try:
+                    subprocess.run(
+                        ["mineru-open-api", "extract", str(chunk), "-o", str(chunk_dir),
+                         "-f", "md,json", "--language", "en", "--model", "pipeline", "--timeout", "300"],
+                        capture_output=True, timeout=360
+                    )
+                    # Merge images
+                    for img in chunk_dir.glob("images/*"):
+                        img.rename(mineru_dir / "images" / img.name)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    else:
+        # Direct MinerU extraction
+        try:
+            subprocess.run(
+                ["mineru-open-api", "extract", str(pdf_path), "-o", str(mineru_dir),
+                 "-f", "md,json", "--language", "en", "--model", "pipeline", "--timeout", "300"],
+                capture_output=True, timeout=360
+            )
+        except Exception:
+            return []
+
+    # Extract figures from MinerU output
+    figures = []
+    images_dir = mineru_dir / "images"
+    md_file = mineru_dir / f"paper_{arxiv_id}.md"
+
+    if not md_file.exists():
+        # Try finding any .md file
+        md_files = list(mineru_dir.glob("**/*.md"))
+        if md_files:
+            md_file = md_files[0]
+
+    if images_dir.exists():
+        for i, img_file in enumerate(sorted(images_dir.iterdir()), 1):
+            if img_file.suffix.lower() in ('.png', '.jpg', '.jpeg'):
+                # Try to find caption from markdown
+                caption = ""
+                if md_file.exists():
+                    md_text = md_file.read_text(encoding="utf-8")
+                    # Look for figure references near the image filename
+                    stem = img_file.stem
+                    cap_match = re.search(
+                        rf'(?:Figure|Fig\.?)\s*{i}[:\s]*(.*?)(?:\n\n|\n#|\Z)',
+                        md_text, re.DOTALL | re.IGNORECASE
+                    )
+                    if cap_match:
+                        caption = cap_match.group(1).strip()[:200]
+
+                figures.append({
+                    "id": f"fig{i}",
+                    "url": "",
+                    "local_path": str(img_file),
+                    "caption": caption or "N/A",
+                    "filename": img_file.name,
+                    "source": "mineru",
+                })
+
+    # Cleanup temp files
+    try:
+        pdf_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    return figures
+
+
 def verify_against_paper(note_path: Path, vault_path: Path) -> dict:
-    """Verify note images against the original paper (no legend needed)."""
+    """Verify note images against the original paper (no legend needed).
+
+    Tries: arXiv HTML first → MinerU PDF fallback.
+    """
     note_text = note_path.read_text(encoding="utf-8")
     arxiv_id = extract_arxiv_id(note_text)
 
     if not arxiv_id:
         return {"ok": False, "detail": "No arXiv ID found in note", "figures": []}
 
-    # Fetch real figures from paper
+    # Try arXiv HTML first
     paper_figures = fetch_paper_figures_from_html(arxiv_id)
+    source = "html"
+
+    # Fallback to MinerU if HTML fails or returns few figures
+    if len(paper_figures) < 2:
+        mineru_figures = fetch_paper_figures_from_mineru(arxiv_id)
+        if len(mineru_figures) > len(paper_figures):
+            paper_figures = mineru_figures
+            source = "mineru"
+
     if not paper_figures:
-        return {"ok": False, "detail": f"Could not fetch HTML for {arxiv_id}", "figures": []}
+        return {"ok": False, "detail": f"Could not fetch figures for {arxiv_id} (tried HTML + MinerU)", "figures": []}
 
     # Extract note references
     note_urls = set()
@@ -150,8 +269,9 @@ def verify_against_paper(note_path: Path, vault_path: Path) -> dict:
         note_stems.add(Path(match.group(1)).stem)
 
     # Cross-verify
-    paper_url_map = {f["url"]: f for f in paper_figures}
+    paper_url_map = {f["url"]: f for f in paper_figures if f.get("url")}
     paper_stem_map = {f["id"]: f for f in paper_figures}
+    paper_filename_map = {f["filename"]: f for f in paper_figures}
 
     matched = []
     unmatched_note = []
@@ -163,30 +283,35 @@ def verify_against_paper(note_path: Path, vault_path: Path) -> dict:
         else:
             # Try stem match
             stem = Path(url).stem
+            filename = Path(url).name
             if stem in paper_stem_map:
                 matched.append(paper_stem_map[stem])
+            elif filename in paper_filename_map:
+                matched.append(paper_filename_map[filename])
             else:
                 unmatched_note.append(url)
 
     for stem in note_stems:
-        if stem not in paper_stem_map and stem not in [m["id"] for m in matched]:
-            # Check if it's a local file reference
-            pass
+        if stem in paper_stem_map:
+            fig = paper_stem_map[stem]
+            if fig not in matched:
+                matched.append(fig)
 
     # Find important figures missing from note
     for fig in paper_figures:
         if fig not in matched:
-            if fig["id"] not in note_stems and fig["url"] not in note_urls:
+            if fig["id"] not in note_stems and fig.get("url", "") not in note_urls:
                 missing_from_note.append(fig)
 
     return {
         "ok": len(unmatched_note) == 0,
         "arxiv_id": arxiv_id,
+        "source": source,
         "paper_figures": len(paper_figures),
         "note_refs": len(note_urls) + len(note_stems),
         "matched": len(matched),
         "unmatched_note": unmatched_note,
-        "missing_from_note": [f["id"] for f in missing_from_note[:10]],  # limit
+        "missing_from_note": [f["id"] for f in missing_from_note[:10]],
         "figures": paper_figures,
     }
 

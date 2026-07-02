@@ -187,7 +187,7 @@ curl -sI "https://arxiv.org/html/${ARXIV_ID}" | head -1
 
 ### 5.2 提取"真实"图片信息
 
-**方法 A: arXiv HTML 提取（首选）**
+**方法 A: arXiv HTML 提取（首选，速度快）**
 
 ```bash
 # 提取所有 figure + caption + image URL
@@ -205,17 +205,46 @@ for i, fig in enumerate(figures, 1):
 "
 ```
 
-**方法 B: MinerU PDF 提取**
+**方法 B: MinerU PDF 提取（HTML 不可用时自动降级）**
+
+当 arXiv HTML 不可用或返回图片太少时，自动降级到 MinerU：
 
 ```bash
-# 下载 PDF
-curl -sL "https://arxiv.org/pdf/${ARXIV_ID}.pdf" -o /tmp/paper_verify.pdf
+# 1. 下载 PDF
+curl -sL "https://arxiv.org/pdf/${ARXIV_ID}.pdf" -o /tmp/paper_verify_${ARXIV_ID}.pdf
 
-# MinerU 提取
-mineru-open-api extract /tmp/paper_verify.pdf -o /tmp/paper_verify/ -f md,json --language en --model pipeline
+# 2. 检查大小，≥1MB 则分割
+PDF_SIZE=$(wc -c < /tmp/paper_verify_${ARXIV_ID}.pdf)
+if [ $PDF_SIZE -gt 1048576 ]; then
+  # 使用 paper-reader 的分割脚本
+  ./dailypaper-skills/skills/paper-reader/scripts/split_pdf_for_mineru.sh \
+      /tmp/paper_verify_${ARXIV_ID}.pdf /tmp/paper_verify_chunks_${ARXIV_ID}
+  # 逐个 chunk 提取
+  for chunk in /tmp/paper_verify_chunks_${ARXIV_ID}/chunk_*.pdf; do
+    mineru-open-api extract "$chunk" -o /tmp/paper_verify_mineru_${ARXIV_ID}/ -f md,json --language en --model pipeline --timeout 300
+  done
+else
+  # 直接 MinerU 提取
+  mineru-open-api extract /tmp/paper_verify_${ARXIV_ID}.pdf -o /tmp/paper_verify_mineru_${ARXIV_ID}/ -f md,json --language en --model pipeline --timeout 300
+fi
 
-# 从 MinerU 输出提取图片和 caption
-ls /tmp/paper_verify/images/
+# 3. 从 MinerU 输出提取图片和 caption
+ls /tmp/paper_verify_mineru_${ARXIV_ID}/images/
+```
+
+**MinerU 优势**:
+- 表格识别（HTML 中表格可能是图片）
+- 公式识别（LaTeX 格式输出）
+- 支持所有 PDF（不依赖 arXiv HTML 可用性）
+
+**自动降级逻辑**:
+```
+arXiv HTML 可用？
+  ├─ 是 → 提取图片
+  │       图片数量 ≥ 2？
+  │         ├─ 是 → 使用 HTML 结果
+  │         └─ 否 → 降级到 MinerU
+  └─ 否 → 直接 MinerU
 ```
 
 ### 5.3 交叉验证
