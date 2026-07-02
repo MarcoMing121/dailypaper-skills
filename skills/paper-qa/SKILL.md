@@ -68,6 +68,7 @@ python3 skills/paper-qa/qa_check.py {笔记路径}
 | **formula_naming** | 公式缺少命名 | 需要手动添加命名 |
 | **symbol_explanation** | 公式缺少符号说明 | 需要手动添加符号说明 |
 | **image_caption** | 图片与描述不匹配 | 需要手动修正描述 |
+| **mermaid_diagram** | 缺少 Mermaid 架构图 | 必须在模型架构部分包含 Mermaid 流程图 |
 
 ## Step 3: 生成报告
 

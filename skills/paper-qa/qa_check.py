@@ -833,6 +833,31 @@ def check_representative_work(vault_path: Path, method_name: str) -> dict:
     }
 
 
+def check_mermaid_diagram(text: str) -> dict:
+    """Check that Mermaid architecture diagram exists in the note."""
+    mermaid_blocks = re.findall(r'```mermaid\s*\n(.*?)\n```', text, re.DOTALL)
+    
+    if not mermaid_blocks:
+        return {
+            "ok": False,
+            "issues": ["笔记中缺少 Mermaid 架构图（模型架构部分必须包含 Mermaid 流程图）"],
+            "stats": {"mermaid_count": 0}
+        }
+    
+    # Check each mermaid block has meaningful content
+    issues = []
+    for i, block in enumerate(mermaid_blocks):
+        node_count = len(re.findall(r'\[.*?\]|\(.*?\)|\{.*?\}', block))
+        if node_count < 3:
+            issues.append(f"Mermaid 图 {i+1} 节点过少（{node_count} 个），建议至少 5 个节点")
+    
+    return {
+        "ok": len(issues) == 0,
+        "issues": issues,
+        "stats": {"mermaid_count": len(mermaid_blocks)}
+    }
+
+
 def check_content_completeness_stats(text: str) -> dict:
     """Just report stats, LLM will compare with paper later."""
     # Count figures
@@ -986,6 +1011,9 @@ async def run_qa(note_path: Path) -> dict:
         # 概念库检查
         "concept_content": check_concept_content(vault_path, method_name),
         "representative_work": check_representative_work(vault_path, method_name),
+        
+        # Mermaid 架构图检查
+        "mermaid_diagram": check_mermaid_diagram(text),
     }
     results["checks"] = checks
     
