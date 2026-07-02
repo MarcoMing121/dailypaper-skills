@@ -55,6 +55,71 @@ git commit                      CheckResults/{Method}.md
 - 两个技能可以**并行运行**
 - image-check 可以用**不同的模型**（如更强的视觉模型）来验证
 
+---
+
+## ⚠️ 视觉验证（可选，用视觉模型"看"图片）
+
+**当前检查只验证文件/链接，不验证图片内容。** 为了真正"看"图片，可以用视觉模型。
+
+### 触发方式
+
+```
+检查一下 HOVER 的图片（用视觉模型验证）
+→ 运行 image-check + 视觉验证
+```
+
+### 流程
+
+```
+image-check 常规检查完成
+    ↓
+有视觉模型可用？
+  ├─ 是 → 对每张图片执行视觉验证
+  │       ├─ 读取图片文件
+  │       ├─ 发送给视觉模型 + caption
+  │       ├─ 模型判断：caption 是否准确？图片是否清晰？
+  │       └─ 返回验证结果
+  └─ 否 → 跳过视觉验证
+    ↓
+写入 CheckResults/{Method}.md
+```
+
+### 视觉验证脚本
+
+```bash
+# 准备验证数据
+python3 scripts/verify_image_visual.py \
+    --image /path/to/image.png \
+    --caption "Figure 1: SkillBlender 架构图" \
+    --title "SkillBlender"
+```
+
+**输出 JSON**:
+```json
+{
+  "ok": true,
+  "image_path": "/path/to/image.png",
+  "image_base64": "...",
+  "mime": "image/png",
+  "caption": "Figure 1: ...",
+  "prompt": "请验证此图片..."
+}
+```
+
+**调用方（agent）拿到 JSON 后**:
+1. 读取 `image_base64` 显示图片给视觉模型
+2. 发送 `prompt` 给视觉模型
+3. 解析模型返回的 JSON 结果
+4. 记录到检查报告
+
+### 视觉验证检查项
+
+| 检查 | 说明 |
+|------|------|
+| caption_accurate | caption 是否准确描述了图片内容 |
+| image_readable | 图片是否清晰可读（非损坏/模糊/空白） |
+| is_paper_figure | 是否是论文中的图片（非无关图片） |
+
 ## 核心功能
 
 1. **Legend 生成**: 为每篇论文创建 `legend.md`，记录所有图片的链接+描述
