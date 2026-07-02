@@ -1,0 +1,245 @@
+---
+name: image-check
+description: |
+  Verify that images in paper notes match their legends and are correctly referenced.
+  Use when: "check images", "verify figures", "图片检查", "检查图片", "image quality check".
+  Also triggers after paper-reader creates a note (auto-QA).
+
+  Features:
+  - Generate image legend files (legend.md) for each paper
+  - Cross-check: note references ↔ legend ↔ actual image files
+  - Support MinerU/HTML image extraction for verification
+  - Write check results to vault root CheckResults/
+metadata:
+  {
+    "openclaw": { "requires": { "bins": ["python3"], "env": [] } },
+  }
+---
+
+# Image Check Skill
+
+图片质量检查与 legend 管理。
+
+## 核心功能
+
+1. **Legend 生成**: 为每篇论文创建 `legend.md`，记录所有图片的链接+描述
+2. **一致性检查**: 验证笔记引用 ↔ legend ↔ 实际图片文件三者匹配
+3. **质量检查**: 验证图片文件存在、大小合理、格式正确
+4. **检查报告**: 通过的检查写入 `CheckResults/{MethodName}.md`
+
+---
+
+## Step 1: Legend 文件格式
+
+每篇论文在 `assets/{MethodName}/` 目录下有一个 `legend.md`：
+
+```markdown
+# Image Legends: {Paper Title}
+
+| ID | Source | Link | Legend | Used in Note |
+|----|--------|------|--------|--------------|
+| fig1 | local | ![[MethodName/fig1.png]] | 系统架构概览，展示输入输出流程 | ✅ |
+| fig2 | external | ![](https://arxiv.org/html/xxx/x2.png) | 模型内部模块详细结构 | ✅ |
+| fig3 | local | ![[MethodName/fig3.png]] | 实验结果对比 | ❌ |
+```
+
+**字段说明**:
+- **ID**: 图片标识（Figure 编号或文件名）
+- **Source**: `local`（已下载到 assets）或 `external`（外部 URL）
+- **Link**: Obsidian wikilink 或 Markdown 外链
+- **Legend**: 图片描述/图例文字（从论文原文提取）
+- **Used in Note**: 是否在笔记中被引用
+
+---
+
+## Step 2: Legend 生成流程
+
+### 2.1 从论文提取 legend
+
+**方法 A: arXiv HTML（首选）**
+
+```bash
+# 从 HTML 提取 figure + caption
+curl -sL "https://arxiv.org/html/{arxiv_id}" | \
+  python3 -c "
+import sys, re
+html = sys.stdin.read()
+figures = re.findall(r'<figure[^>]*>(.*?)</figure>', html, re.DOTALL)
+for i, fig in enumerate(figures, 1):
+    caption = re.search(r'<figcaption[^>]*>(.*?)</figcaption>', fig, re.DOTALL)
+    img = re.search(r'<img[^>]*src=[\"']([^\"']+)[\"']', fig)
+    cap_text = re.sub(r'<[^>]+>', '', caption.group(1)).strip() if caption else 'N/A'
+    img_url = img.group(1) if img else 'N/A'
+    print(f'fig{i}|{img_url}|{cap_text}')
+"
+```
+
+**方法 B: MinerU PDF 提取**
+
+MinerU 自动提取的图片在 `images/` 目录，legend 从论文 Markdown 中的 figure caption 段落提取。
+
+**方法 C: 手动补充**
+
+如果自动提取失败，从论文 PDF 中手动复制 figure caption。
+
+### 2.2 生成 legend.md
+
+```python
+def generate_legend(method_name, paper_title, figures):
+    """
+    figures: list of dict with keys: id, source, link, caption
+    """
+    lines = [
+        f"# Image Legends: {paper_title}",
+        "",
+        "| ID | Source | Link | Legend | Used in Note |",
+        "|----|--------|------|--------|--------------|",
+    ]
+    for fig in figures:
+        lines.append(
+            f"| {fig['id']} | {fig['source']} | {fig['link']} | {fig['caption']} | ❌ |"
+        )
+    return "\n".join(lines)
+```
+
+---
+
+## Step 3: 一致性检查
+
+### 3.1 三向匹配检查
+
+```bash
+# 1. 从笔记提取引用的图片
+grep -oP '!\[\[([^\]|]+)(?:\|[0-9]+)?\]\]' {note_path} | sed 's/!\[\[//; s/\|[0-9]*//; s/\]\]//'
+grep -oP '!\[([^\]]*)\]\((https?://[^)]+)\)' {note_path}
+
+# 2. 从 legend.md 提取记录的图片
+# 3. 从 assets/ 目录提取实际存在的文件
+ls {vault}/assets/{method_name}/
+
+# 4. 三向对比
+```
+
+### 3.2 检查项
+
+| 检查 | 说明 | 结果 |
+|------|------|------|
+| **引用存在** | 笔记中引用的图片在 legend 中有记录 | ✅/❌ |
+| **文件存在** | legend 中 local 类型的图片在 assets/ 中存在 | ✅/❌ |
+| **文件大小** | 图片文件 > 10KB（不是空文件或损坏） | ✅/❌ |
+| **格式正确** | 图片格式为 jpg/png/gif/webp | ✅/❌ |
+| **legend 完整** | 所有图片都有 legend 描述 | ✅/❌ |
+| **引用完整** | legend 中标记 Used 的图片确实在笔记中被引用 | ✅/❌ |
+
+---
+
+## Step 4: 检查报告
+
+通过的检查写入 `{VAULT_PATH}/CheckResults/{MethodName}.md`：
+
+```markdown
+---
+title: "Image Check: {MethodName}"
+date: {YYYY-MM-DD HH:MM}
+status: passed | failed
+paper_path: Papers/{category}/{MethodName}.md
+---
+
+# Image Check Report: {MethodName}
+
+## 检查结果
+
+| 检查项 | 状态 | 详情 |
+|--------|------|------|
+| 引用存在 | ✅ | 9/9 图片在 legend 中有记录 |
+| 文件存在 | ✅ | 9/9 本地文件存在 |
+| 文件大小 | ✅ | 所有文件 > 10KB |
+| legend 完整 | ✅ | 所有图片有描述 |
+
+## 图片列表
+
+| ID | 状态 | Legend |
+|----|------|--------|
+| fig1 | ✅ | 系统架构概览 |
+| fig2 | ✅ | 模型架构图 |
+...
+```
+
+---
+
+## Step 5: 批量检查（定时任务用）
+
+### 获取最近创建的笔记
+
+```python
+from pathlib import Path
+from datetime import datetime
+
+def get_recent_notes(vault_path, limit=10):
+    """获取最近创建的论文笔记，按日期降序"""
+    notes_dir = Path(vault_path) / "Papers"
+    notes = []
+    for md in notes_dir.rglob("*.md"):
+        if md.name.startswith("_"):
+            continue
+        stat = md.stat()
+        notes.append({
+            "path": md,
+            "created": datetime.fromtimestamp(stat.st_ctime),
+            "name": md.stem
+        })
+    notes.sort(key=lambda x: x["created"], reverse=True)
+    return notes[:limit]
+```
+
+### 检查状态
+
+```python
+def needs_check(vault_path, method_name):
+    """判断是否需要检查"""
+    check_file = Path(vault_path) / "CheckResults" / f"{method_name}.md"
+    if not check_file.exists():
+        return True
+    # 检查是否笔记有更新
+    note_mtime = ...  # 获取笔记修改时间
+    check_mtime = datetime.fromtimestamp(check_file.stat().st_mtime)
+    return note_mtime > check_mtime
+```
+
+---
+
+## 使用方式
+
+### 单篇检查
+
+```
+检查一下 SkillBlender 的图片
+→ 运行 image-check 流程
+```
+
+### 批量检查（定时任务）
+
+```
+提醒我检查最近的论文笔记图片
+→ 获取 top 10 最近笔记
+→ 列出需要检查的
+→ 提醒用户
+```
+
+---
+
+## 与 paper-reader 的集成
+
+paper-reader 在保存笔记后应自动：
+1. 生成 `assets/{MethodName}/legend.md`
+2. 将 legend 信息嵌入笔记的图表章节
+
+### Legend 生成脚本
+
+```bash
+# 在 paper-reader 流程末尾调用
+python3 skills/image-check/scripts/generate_legend.py \
+    --note {note_path} \
+    --assets {assets_dir} \
+    --output {assets_dir}/legend.md
+```
