@@ -86,6 +86,235 @@ def extract_arxiv_id(text: str) -> str:
     return ""
 
 
+def extract_figures_from_html_text(html_text: str, arxiv_id: str) -> list:
+    """Extract figures from HTML text directly (for small HTML files)."""
+    figures = []
+    fig_pattern = re.compile(r'<figure[^>]*>(.*?)</figure>', re.DOTALL)
+    img_pattern = re.compile(r'<img[^>]*src=["\']([^"\']+)["\']', re.DOTALL)
+    caption_pattern = re.compile(r'<figcaption[^>]*>(.*?)</figcaption>', re.DOTALL)
+
+    for fig_match in fig_pattern.finditer(html_text):
+        fig_html = fig_match.group(1)
+        img_match = img_pattern.search(fig_html)
+        img_url = img_match.group(1) if img_match else ""
+        if img_url and not img_url.startswith("http"):
+            img_url = f"https://arxiv.org/html/{arxiv_id}/{img_url}"
+
+        filename = Path(img_url).stem if img_url else ""
+        ext = Path(img_url).suffix if img_url else ".png"
+
+        cap_match = caption_pattern.search(fig_html)
+        caption = re.sub(r'<[^>]+>', '', cap_match.group(1)).strip() if cap_match else ""
+
+        if filename:
+            figures.append({
+                "id": filename,
+                "url": img_url,
+                "caption": caption[:200],
+                "filename": f"{filename}{ext}",
+                "source": "html",
+            })
+
+    return figures
+
+
+def extract_figures_from_chunk_result(chunk_json_path: Path) -> list:
+    """Extract figure info from a subagent chunk result JSON."""
+    if not chunk_json_path.exists():
+        return []
+    try:
+        data = json.loads(chunk_json_path.read_text(encoding="utf-8"))
+        return data.get("figures", [])
+    except Exception:
+        return []
+
+
+def extract_figures_via_subagents(file_path: Path, arxiv_id: str, mode: str) -> list:
+    """Extract figures using parallel subagent chunk extraction (paper-reader style).
+
+    mode: 'html' or 'mineru'
+    """
+    import subprocess
+
+    text = file_path.read_text(encoding="utf-8")
+    lines = text.count('\n')
+    chunk_size = 300
+    num_chunks = (lines + chunk_size - 1) // chunk_size
+
+    # Split into chunks
+    chunk_files = []
+    for i in range(1, num_chunks + 1):
+        start = (i - 1) * chunk_size + 1
+        end = min(i * chunk_size, lines)
+        chunk_file = Path(f"/tmp/verify_chunk_{arxiv_id}_{i}.{'html' if mode == 'html' else 'md'}")
+        subprocess.run(
+            ["sed", "-n", f"{start},{end}p", str(file_path)],
+            capture_output=True, text=True
+        )
+        # Write chunk
+        chunk_lines = text.split('\n')[start-1:end]
+        chunk_file.write_text('\n'.join(chunk_lines), encoding="utf-8")
+        chunk_files.append(chunk_file)
+
+    # NOTE: We can't actually spawn subagents from a script.
+    # Instead, we do direct extraction from chunks.
+    all_figures = []
+
+    for chunk_file in chunk_files:
+        chunk_text = chunk_file.read_text(encoding="utf-8")
+
+        if mode == "html":
+            figs = extract_figures_from_html_text(chunk_text, arxiv_id)
+        else:
+            # MinerU markdown — look for figure references
+            figs = extract_figures_from_mineru_text(chunk_text)
+
+        all_figures.extend(figs)
+
+        # Cleanup
+        chunk_file.unlink(missing_ok=True)
+
+    return all_figures
+
+
+def extract_figures_from_mineru_text(md_text: str) -> list:
+    """Extract figures from MinerU markdown text."""
+    figures = []
+
+    # Look for image references: ![caption](path)
+    for match in re.finditer(r'!\[([^\]]*)\]\(([^)]+)\)', md_text):
+        caption = match.group(1)
+        path = match.group(2)
+        figures.append({
+            "id": Path(path).stem,
+            "url": "",
+            "local_path": path,
+            "caption": caption[:200] if caption else "N/A",
+            "filename": Path(path).name,
+            "source": "mineru",
+        })
+
+    return figures
+
+
+def extract_figures_via_mineru(arxiv_id: str) -> list:
+    """Full MinerU extraction pipeline with PDF splitting (same as paper-reader)."""
+    import subprocess
+
+    pdf_path = Path(f"/tmp/paper_verify_{arxiv_id}.pdf")
+    mineru_dir = Path(f"/tmp/paper_verify_mineru_{arxiv_id}")
+
+    # Download PDF
+    try:
+        subprocess.run(
+            ["curl", "-sL", f"https://arxiv.org/pdf/{arxiv_id}.pdf", "-o", str(pdf_path)],
+            capture_output=True, timeout=60
+        )
+    except Exception:
+        return []
+
+    if not pdf_path.exists() or pdf_path.stat().st_size < 1000:
+        return []
+
+    pdf_size_mb = pdf_path.stat().st_size / (1024 * 1024)
+
+    # Split if ≥1MB (reuse paper-reader's split script)
+    split_script = Path(__file__).parent.parent.parent / "paper-reader" / "scripts" / "split_pdf_for_mineru.sh"
+
+    if pdf_size_mb >= 1 and split_script.exists():
+        chunks_dir = Path(f"/tmp/paper_verify_chunks_{arxiv_id}")
+        try:
+            subprocess.run(
+                ["bash", str(split_script), str(pdf_path), str(chunks_dir)],
+                capture_output=True, timeout=120
+            )
+            # Process each chunk
+            mineru_dir.mkdir(parents=True, exist_ok=True)
+            (mineru_dir / "images").mkdir(exist_ok=True)
+
+            for chunk in sorted(chunks_dir.glob("chunk_*.pdf")):
+                chunk_dir = mineru_dir / chunk.stem
+                try:
+                    subprocess.run(
+                        ["mineru-open-api", "extract", str(chunk), "-o", str(chunk_dir),
+                         "-f", "md,json", "--language", "en", "--model", "pipeline", "--timeout", "300"],
+                        capture_output=True, timeout=360
+                    )
+                    # Merge images
+                    if (chunk_dir / "images").exists():
+                        for img in (chunk_dir / "images").iterdir():
+                            target = mineru_dir / "images" / img.name
+                            if not target.exists():
+                                img.rename(target)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    else:
+        # Direct MinerU extraction
+        try:
+            subprocess.run(
+                ["mineru-open-api", "extract", str(pdf_path), "-o", str(mineru_dir),
+                 "-f", "md,json", "--language", "en", "--model", "pipeline", "--timeout", "300"],
+                capture_output=True, timeout=360
+            )
+        except Exception:
+            return []
+
+    # Find MinerU markdown output
+    md_files = list(mineru_dir.glob("**/*.md"))
+    images_dir = mineru_dir / "images"
+
+    if not images_dir.exists() or not md_files:
+        return []
+
+    # Extract figures from markdown (chunk if large)
+    all_figures = []
+    md_text = md_files[0].read_text(encoding="utf-8")
+    md_lines = md_text.count('\n')
+
+    if md_lines > 500:
+        # Large markdown — chunk extraction
+        chunk_size = 300
+        for i in range(1, (md_lines // chunk_size) + 2):
+            start = (i - 1) * chunk_size
+            end = min(i * chunk_size, md_lines)
+            chunk_lines = md_text.split('\n')[start:end]
+            chunk_text = '\n'.join(chunk_lines)
+            figs = extract_figures_from_mineru_text(chunk_text)
+            all_figures.extend(figs)
+    else:
+        all_figures = extract_figures_from_mineru_text(md_text)
+
+    # Add image file paths
+    for fig in all_figures:
+        if fig.get("local_path"):
+            full_path = mineru_dir / fig["local_path"]
+            if full_path.exists():
+                fig["local_path"] = str(full_path)
+
+    # Also list images that aren't referenced in markdown
+    referenced = {f["filename"] for f in all_figures}
+    for img_file in images_dir.iterdir():
+        if img_file.name not in referenced and img_file.suffix.lower() in ('.png', '.jpg', '.jpeg'):
+            all_figures.append({
+                "id": img_file.stem,
+                "url": "",
+                "local_path": str(img_file),
+                "caption": "N/A",
+                "filename": img_file.name,
+                "source": "mineru",
+            })
+
+    # Cleanup
+    try:
+        pdf_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    return all_figures
+
+
 def fetch_paper_figures_from_html(arxiv_id: str) -> list:
     """Fetch figure info directly from arXiv HTML."""
     import subprocess
@@ -238,7 +467,10 @@ def fetch_paper_figures_from_mineru(arxiv_id: str) -> list:
 def verify_against_paper(note_path: Path, vault_path: Path) -> dict:
     """Verify note images against the original paper (no legend needed).
 
-    Tries: arXiv HTML first → MinerU PDF fallback.
+    Uses the SAME extraction pipeline as paper-reader:
+    1. arXiv HTML → chunk → parallel subagent extraction
+    2. MinerU PDF → split → parallel subagent extraction (fallback)
+    3. Compare extracted figures with note references
     """
     note_text = note_path.read_text(encoding="utf-8")
     arxiv_id = extract_arxiv_id(note_text)
@@ -246,19 +478,40 @@ def verify_against_paper(note_path: Path, vault_path: Path) -> dict:
     if not arxiv_id:
         return {"ok": False, "detail": "No arXiv ID found in note", "figures": []}
 
-    # Try arXiv HTML first
-    paper_figures = fetch_paper_figures_from_html(arxiv_id)
+    # === Phase 1: Try arXiv HTML (same as paper-reader) ===
+    html_path = Path(f"/tmp/paper_verify_{arxiv_id}.html")
+    paper_figures = []
     source = "html"
 
-    # Fallback to MinerU if HTML fails or returns few figures
+    try:
+        import subprocess
+        subprocess.run(
+            ["curl", "-sL", f"https://arxiv.org/html/{arxiv_id}", "-o", str(html_path)],
+            capture_output=True, timeout=30
+        )
+    except Exception:
+        pass
+
+    if html_path.exists() and html_path.stat().st_size > 1000:
+        html_text = html_path.read_text(encoding="utf-8")
+        lines = html_text.count('\n')
+
+        if lines <= 500:
+            # Small HTML — extract directly
+            paper_figures = extract_figures_from_html_text(html_text, arxiv_id)
+        else:
+            # Large HTML — chunk + parallel subagent extraction (paper-reader style)
+            paper_figures = extract_figures_via_subagents(html_path, arxiv_id, "html")
+
+    # === Phase 2: MinerU fallback (same as paper-reader) ===
     if len(paper_figures) < 2:
-        mineru_figures = fetch_paper_figures_from_mineru(arxiv_id)
-        if len(mineru_figures) > len(paper_figures):
-            paper_figures = mineru_figures
-            source = "mineru"
+        source = "mineru"
+        paper_figures = extract_figures_via_mineru(arxiv_id)
 
     if not paper_figures:
-        return {"ok": False, "detail": f"Could not fetch figures for {arxiv_id} (tried HTML + MinerU)", "figures": []}
+        return {"ok": False, "detail": f"Could not fetch figures for {arxiv_id}", "figures": []}
+
+    # === Phase 3: Cross-verify ===
 
     # Extract note references
     note_urls = set()

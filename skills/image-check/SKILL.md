@@ -171,9 +171,20 @@ paper_path: Papers/{category}/{MethodName}.md
 
 **当论文笔记没有 legend.md 时，image-check 必须自行读取原论文来验证图片质量。**
 
-### 5.1 获取原论文
+### 5.1 获取原论文（与 paper-reader 相同的提取流程）
 
-**优先级**: arXiv HTML > MinerU PDF > 项目主页
+**image-check 使用与 paper-reader 完全相同的提取流程**：
+
+```
+获取原论文
+    ↓
+arXiv HTML 可用？
+  ├─ 行数 ≤ 500 → 直接提取 figure + caption
+  ├─ 行数 > 500 → 分块（300行/块）→ 逐块提取 → 合并
+  └─ 不可用 → 降级到 MinerU
+                ├─ PDF < 1MB → 直接 MinerU 提取
+                └─ PDF ≥ 1MB → split_pdf_for_mineru.sh 分割 → 逐块 MinerU → 合并
+```
 
 ```bash
 # 1. 从笔记 frontmatter 提取 arxiv_id 或 url
@@ -181,13 +192,15 @@ ARXIV_ID=$(grep -oP 'arxiv.*?(\d{4}\.\d{4,5})' {note_path} | head -1 | grep -oP 
 
 # 2. 检查 arXiv HTML 是否可用
 curl -sI "https://arxiv.org/html/${ARXIV_ID}" | head -1
-# 如果 200 → 使用 HTML 提取
-# 如果非 200 → 下载 PDF 用 MinerU
 ```
 
 ### 5.2 提取"真实"图片信息
 
 **方法 A: arXiv HTML 提取（首选，速度快）**
+
+与 paper-reader 相同：
+- 小文件（≤500 行）：直接提取 `<figure>` + `<figcaption>`
+- 大文件（>500 行）：分 300 行/块，逐块提取后合并
 
 ```bash
 # 提取所有 figure + caption + image URL
@@ -207,44 +220,32 @@ for i, fig in enumerate(figures, 1):
 
 **方法 B: MinerU PDF 提取（HTML 不可用时自动降级）**
 
-当 arXiv HTML 不可用或返回图片太少时，自动降级到 MinerU：
+与 paper-reader 完全相同的流程：
+1. 下载 PDF
+2. 检查大小 → ≥1MB 则用 `split_pdf_for_mineru.sh` 分割
+3. 逐个 chunk 调用 `mineru-open-api extract`
+4. 合并图片和 Markdown
+5. 从 Markdown 提取 figure caption
 
 ```bash
-# 1. 下载 PDF
-curl -sL "https://arxiv.org/pdf/${ARXIV_ID}.pdf" -o /tmp/paper_verify_${ARXIV_ID}.pdf
-
-# 2. 检查大小，≥1MB 则分割
-PDF_SIZE=$(wc -c < /tmp/paper_verify_${ARXIV_ID}.pdf)
-if [ $PDF_SIZE -gt 1048576 ]; then
-  # 使用 paper-reader 的分割脚本
-  ./dailypaper-skills/skills/paper-reader/scripts/split_pdf_for_mineru.sh \
-      /tmp/paper_verify_${ARXIV_ID}.pdf /tmp/paper_verify_chunks_${ARXIV_ID}
-  # 逐个 chunk 提取
-  for chunk in /tmp/paper_verify_chunks_${ARXIV_ID}/chunk_*.pdf; do
-    mineru-open-api extract "$chunk" -o /tmp/paper_verify_mineru_${ARXIV_ID}/ -f md,json --language en --model pipeline --timeout 300
-  done
-else
-  # 直接 MinerU 提取
-  mineru-open-api extract /tmp/paper_verify_${ARXIV_ID}.pdf -o /tmp/paper_verify_mineru_${ARXIV_ID}/ -f md,json --language en --model pipeline --timeout 300
-fi
-
-# 3. 从 MinerU 输出提取图片和 caption
-ls /tmp/paper_verify_mineru_${ARXIV_ID}/images/
+# 完整流程（自动）
+python3 check_images.py --note /path/to/note.md --generate-legend
 ```
 
 **MinerU 优势**:
 - 表格识别（HTML 中表格可能是图片）
 - 公式识别（LaTeX 格式输出）
 - 支持所有 PDF（不依赖 arXiv HTML 可用性）
+- 大 PDF 自动分割（复用 paper-reader 的 split 脚本）
 
 **自动降级逻辑**:
 ```
 arXiv HTML 可用？
   ├─ 是 → 提取图片
   │       图片数量 ≥ 2？
-  │         ├─ 是 → 使用 HTML 结果
-  │         └─ 否 → 降级到 MinerU
-  └─ 否 → 直接 MinerU
+  │         ├─ 是 → 使用 HTML 结果 ✅
+  │         └─ 否 → 降级到 MinerU 🔄
+  └─ 否 → 直接 MinerU 🔄
 ```
 
 ### 5.3 交叉验证
