@@ -664,7 +664,30 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
             "detail": "No legend file to check",
         }
     
-    # Check 5: Note references match legend
+    # Check 5: External link reachability
+    external_urls = [img["url"] for img in note_images["external"]]
+    unreachable_urls = []
+    if external_urls:
+        import subprocess
+        for url in external_urls[:20]:  # Limit to 20 to avoid timeout
+            try:
+                result = subprocess.run(
+                    ["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}", url],
+                    capture_output=True, text=True, timeout=10
+                )
+                status = result.stdout.strip()
+                if status not in ("200", "301", "302"):
+                    unreachable_urls.append(f"{url} ({status})")
+            except Exception:
+                unreachable_urls.append(f"{url} (timeout)")
+    checks["external_links"] = {
+        "ok": len(unreachable_urls) == 0,
+        "detail": f"Unreachable: {unreachable_urls}" if unreachable_urls else f"All {len(external_urls)} external links reachable",
+    }
+    if unreachable_urls:
+        issues.append(f"Unreachable external links: {unreachable_urls}")
+    
+    # Check 6: Note references match legend
     if legends:
         legend_ids = {l["id"] for l in legends}
         note_stems = {img["stem"] for img in note_images["local"] + note_images["external"]}
@@ -679,18 +702,14 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
         if paper_verify["ok"]:
             checks["reference_match"] = {
                 "ok": True,
-                "detail": f"Verified against paper: {paper_verify['matched']}/{paper_verify['paper_figures']} figures matched",
+                "detail": f"Verified against paper ({paper_verify.get('source', '?')}): "
+                          f"{paper_verify['matched']}/{paper_verify['paper_figures']} figures matched",
             }
-            # Auto-generate legend from paper data
-            if paper_verify.get("figures"):
-                try:
-                    from generate_legend import main as gen_legend
-                    # Will be generated separately
-                except ImportError:
-                    pass
             checks["paper_verify"] = {
                 "ok": len(paper_verify.get("unmatched_note", [])) == 0,
-                "detail": f"Paper has {paper_verify['paper_figures']} figures, note refs {paper_verify['note_refs']}, "
+                "detail": f"Source: {paper_verify.get('source', '?')}, "
+                          f"Paper has {paper_verify['paper_figures']} figures, "
+                          f"note refs {paper_verify['note_refs']}, "
                           f"matched {paper_verify['matched']}, "
                           f"missing from note: {paper_verify.get('missing_from_note', [])}",
             }

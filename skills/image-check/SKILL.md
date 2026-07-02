@@ -59,8 +59,34 @@ git commit                      CheckResults/{Method}.md
 
 1. **Legend 生成**: 为每篇论文创建 `legend.md`，记录所有图片的链接+描述
 2. **一致性检查**: 验证笔记引用 ↔ legend ↔ 实际图片文件三者匹配
-3. **质量检查**: 验证图片文件存在、大小合理、格式正确
-4. **检查报告**: 通过的检查写入 `CheckResults/{MethodName}.md`
+3. **外链可达性**: 检查笔记中使用的外部图片链接是否仍然有效（HTTP 200）
+4. **原论文验证（仅当无 legend 时）**: 从原论文提取真实图片信息，与笔记对比
+5. **检查报告**: 通过的检查写入 `CheckResults/{MethodName}.md`
+
+---
+
+## 工作流程
+
+```
+输入: 论文笔记 .md
+    ↓
+legend.md 存在？
+  ├─ 是 → 直接用 legend 做一致性检查
+  │       ↓
+  │       检查外链可达性（HTTP HEAD）
+  │       ↓
+  │       检查笔记引用 ↔ legend 匹配
+  │       ↓
+  │       检查本地文件存在 + 大小
+  │
+  └─ 否 → 从原论文提取（HTML/MinerU）
+          ↓
+          生成 legend.md
+          ↓
+          同上检查
+    ↓
+写入 CheckResults/{Method}.md
+```
 
 ---
 
@@ -71,18 +97,20 @@ git commit                      CheckResults/{Method}.md
 ```markdown
 # Image Legends: {Paper Title}
 
+Generated: 2026-07-02 14:00
+
 | ID | Source | Link | Legend | Used in Note |
 |----|--------|------|--------|--------------|
-| fig1 | local | ![[MethodName/fig1.png]] | 系统架构概览，展示输入输出流程 | ✅ |
-| fig2 | external | ![](https://arxiv.org/html/xxx/x2.png) | 模型内部模块详细结构 | ✅ |
-| fig3 | local | ![[MethodName/fig3.png]] | 实验结果对比 | ❌ |
+| x1 | external | ![](https://arxiv.org/html/2506.09366/x1.png) | 系统架构概览 | ✅ |
+| x2 | external | ![](https://arxiv.org/html/2506.09366/x2.png) | 模型架构图 | ✅ |
+| x3 | local | ![[SkillBlender/x3.png]] | SkillBench 基准 | ✅ |
 ```
 
 **字段说明**:
-- **ID**: 图片标识（Figure 编号或文件名）
-- **Source**: `local`（已下载到 assets）或 `external`（外部 URL）
-- **Link**: Obsidian wikilink 或 Markdown 外链
-- **Legend**: 图片描述/图例文字（从论文原文提取）
+- **ID**: 图片标识（文件名 stem）
+- **Source**: `external`（外部 URL）或 `local`（已下载到 assets）
+- **Link**: Obsidian wikilink `![[...]]` 或 Markdown 外链 `![](url)`
+- **Legend**: 图片描述/图例（从论文提取）
 - **Used in Note**: 是否在笔记中被引用
 
 ---
