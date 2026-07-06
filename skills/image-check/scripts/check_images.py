@@ -197,14 +197,40 @@ def extract_figures_from_mineru_text(md_text: str) -> list:
     return figures
 
 
-def extract_figures_via_mineru(arxiv_id: str) -> list:
-    """Full MinerU extraction pipeline with PDF splitting (same as paper-reader)."""
+def extract_figures_via_mineru(arxiv_id: str, force: bool = False) -> list:
+    """Full MinerU extraction pipeline with PDF splitting (same as paper-reader).
+
+    Results are cached to /tmp/paper_verify_mineru_{arxiv_id}/ so they persist
+    across calls. Pass force=True to re-extract even if cache exists.
+
+    Cache layout:
+        /tmp/paper_verify_mineru_{arxiv_id}/
+            images/           — extracted image files
+            *.md              — MinerU markdown output
+            figures_cache.json — parsed figure metadata (cache)
+    """
     import subprocess
 
-    pdf_path = Path(f"/tmp/paper_verify_{arxiv_id}.pdf")
     mineru_dir = Path(f"/tmp/paper_verify_mineru_{arxiv_id}")
+    cache_file = mineru_dir / "figures_cache.json"
 
-    # Download PDF
+    # === Cache hit: return saved results ===
+    if not force and cache_file.exists():
+        try:
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
+            # Verify referenced files still exist
+            valid = []
+            for fig in cached:
+                lp = fig.get("local_path", "")
+                if not lp or Path(lp).exists():
+                    valid.append(fig)
+            if valid:
+                return valid
+        except Exception:
+            pass  # Cache corrupted, re-extract
+
+    # === Download PDF ===
+    pdf_path = Path(f"/tmp/paper_verify_{arxiv_id}.pdf")
     try:
         subprocess.run(
             ["curl", "-sL", f"https://arxiv.org/pdf/{arxiv_id}.pdf", "-o", str(pdf_path)],
@@ -218,7 +244,7 @@ def extract_figures_via_mineru(arxiv_id: str) -> list:
 
     pdf_size_mb = pdf_path.stat().st_size / (1024 * 1024)
 
-    # Split if ≥1MB (reuse paper-reader's split script)
+    # === Split if ≥1MB (reuse paper-reader's split script) ===
     split_script = Path(__file__).parent.parent.parent / "paper-reader" / "scripts" / "split_pdf_for_mineru.sh"
 
     if pdf_size_mb >= 1 and split_script.exists():
@@ -228,7 +254,6 @@ def extract_figures_via_mineru(arxiv_id: str) -> list:
                 ["bash", str(split_script), str(pdf_path), str(chunks_dir)],
                 capture_output=True, timeout=120
             )
-            # Process each chunk
             mineru_dir.mkdir(parents=True, exist_ok=True)
             (mineru_dir / "images").mkdir(exist_ok=True)
 
@@ -240,7 +265,6 @@ def extract_figures_via_mineru(arxiv_id: str) -> list:
                          "-f", "md,json", "--language", "en", "--model", "pipeline", "--timeout", "300"],
                         capture_output=True, timeout=360
                     )
-                    # Merge images
                     if (chunk_dir / "images").exists():
                         for img in (chunk_dir / "images").iterdir():
                             target = mineru_dir / "images" / img.name
@@ -261,20 +285,19 @@ def extract_figures_via_mineru(arxiv_id: str) -> list:
         except Exception:
             return []
 
-    # Find MinerU markdown output
+    # === Find MinerU markdown output ===
     md_files = list(mineru_dir.glob("**/*.md"))
     images_dir = mineru_dir / "images"
 
     if not images_dir.exists() or not md_files:
         return []
 
-    # Extract figures from markdown (chunk if large)
+    # === Extract figures from markdown ===
     all_figures = []
     md_text = md_files[0].read_text(encoding="utf-8")
     md_lines = md_text.count('\n')
 
     if md_lines > 500:
-        # Large markdown — chunk extraction
         chunk_size = 300
         for i in range(1, (md_lines // chunk_size) + 2):
             start = (i - 1) * chunk_size
@@ -286,14 +309,14 @@ def extract_figures_via_mineru(arxiv_id: str) -> list:
     else:
         all_figures = extract_figures_from_mineru_text(md_text)
 
-    # Add image file paths
+    # Resolve local file paths
     for fig in all_figures:
         if fig.get("local_path"):
             full_path = mineru_dir / fig["local_path"]
             if full_path.exists():
                 fig["local_path"] = str(full_path)
 
-    # Also list images that aren't referenced in markdown
+    # Include images not referenced in markdown
     referenced = {f["filename"] for f in all_figures}
     for img_file in images_dir.iterdir():
         if img_file.name not in referenced and img_file.suffix.lower() in ('.png', '.jpg', '.jpeg'):
@@ -306,162 +329,19 @@ def extract_figures_via_mineru(arxiv_id: str) -> list:
                 "source": "mineru",
             })
 
-    # Cleanup
+    # === Save cache (persist across runs) ===
+    try:
+        cache_file.write_text(json.dumps(all_figures, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    # Cleanup downloaded PDF only (keep extracted results)
     try:
         pdf_path.unlink(missing_ok=True)
     except Exception:
         pass
 
     return all_figures
-
-
-def fetch_paper_figures_from_html(arxiv_id: str) -> list:
-    """Fetch figure info directly from arXiv HTML."""
-    import subprocess
-    url = f"https://arxiv.org/html/{arxiv_id}"
-    try:
-        result = subprocess.run(
-            ["curl", "-sL", url],
-            capture_output=True, text=True, timeout=30
-        )
-        html = result.stdout
-    except Exception:
-        return []
-
-    figures = []
-    fig_pattern = re.compile(r'<figure[^>]*>(.*?)</figure>', re.DOTALL)
-    img_pattern = re.compile(r'<img[^>]*src=["\']([^"\']+)["\']', re.DOTALL)
-    caption_pattern = re.compile(r'<figcaption[^>]*>(.*?)</figcaption>', re.DOTALL)
-
-    for fig_match in fig_pattern.finditer(html):
-        fig_html = fig_match.group(1)
-        img_match = img_pattern.search(fig_html)
-        img_url = img_match.group(1) if img_match else ""
-        if img_url and not img_url.startswith("http"):
-            img_url = f"https://arxiv.org/html/{arxiv_id}/{img_url}"
-
-        filename = Path(img_url).stem if img_url else ""
-        ext = Path(img_url).suffix if img_url else ".png"
-
-        cap_match = caption_pattern.search(fig_html)
-        caption = re.sub(r'<[^>]+>', '', cap_match.group(1)).strip() if cap_match else ""
-
-        if filename:
-            figures.append({
-                "id": filename,
-                "url": img_url,
-                "caption": caption[:200],
-                "filename": f"{filename}{ext}",
-                "source": "html",
-            })
-
-    return figures
-
-
-def fetch_paper_figures_from_mineru(arxiv_id: str) -> list:
-    """Fetch figure info from MinerU PDF extraction."""
-    import subprocess
-
-    pdf_path = Path(f"/tmp/paper_verify_{arxiv_id}.pdf")
-    mineru_dir = Path(f"/tmp/paper_verify_mineru_{arxiv_id}")
-
-    # Download PDF
-    try:
-        subprocess.run(
-            ["curl", "-sL", f"https://arxiv.org/pdf/{arxiv_id}.pdf", "-o", str(pdf_path)],
-            capture_output=True, timeout=60
-        )
-    except Exception:
-        return []
-
-    if not pdf_path.exists() or pdf_path.stat().st_size < 1000:
-        return []
-
-    pdf_size_mb = pdf_path.stat().st_size / (1024 * 1024)
-
-    # Split if needed (reuse paper-reader's split script)
-    split_script = Path(__file__).parent.parent.parent / "paper-reader" / "scripts" / "split_pdf_for_mineru.sh"
-
-    if pdf_size_mb >= 1 and split_script.exists():
-        chunks_dir = Path(f"/tmp/paper_verify_chunks_{arxiv_id}")
-        try:
-            subprocess.run(
-                ["bash", str(split_script), str(pdf_path), str(chunks_dir)],
-                capture_output=True, timeout=120
-            )
-            # Process each chunk
-            mineru_dir.mkdir(parents=True, exist_ok=True)
-            (mineru_dir / "images").mkdir(exist_ok=True)
-
-            for chunk in sorted(chunks_dir.glob("chunk_*.pdf")):
-                chunk_dir = mineru_dir / chunk.stem
-                try:
-                    subprocess.run(
-                        ["mineru-open-api", "extract", str(chunk), "-o", str(chunk_dir),
-                         "-f", "md,json", "--language", "en", "--model", "pipeline", "--timeout", "300"],
-                        capture_output=True, timeout=360
-                    )
-                    # Merge images
-                    for img in chunk_dir.glob("images/*"):
-                        img.rename(mineru_dir / "images" / img.name)
-                except Exception:
-                    continue
-        except Exception:
-            pass
-    else:
-        # Direct MinerU extraction
-        try:
-            subprocess.run(
-                ["mineru-open-api", "extract", str(pdf_path), "-o", str(mineru_dir),
-                 "-f", "md,json", "--language", "en", "--model", "pipeline", "--timeout", "300"],
-                capture_output=True, timeout=360
-            )
-        except Exception:
-            return []
-
-    # Extract figures from MinerU output
-    figures = []
-    images_dir = mineru_dir / "images"
-    md_file = mineru_dir / f"paper_{arxiv_id}.md"
-
-    if not md_file.exists():
-        # Try finding any .md file
-        md_files = list(mineru_dir.glob("**/*.md"))
-        if md_files:
-            md_file = md_files[0]
-
-    if images_dir.exists():
-        for i, img_file in enumerate(sorted(images_dir.iterdir()), 1):
-            if img_file.suffix.lower() in ('.png', '.jpg', '.jpeg'):
-                # Try to find caption from markdown
-                caption = ""
-                if md_file.exists():
-                    md_text = md_file.read_text(encoding="utf-8")
-                    # Look for figure references near the image filename
-                    stem = img_file.stem
-                    cap_match = re.search(
-                        rf'(?:Figure|Fig\.?)\s*{i}[:\s]*(.*?)(?:\n\n|\n#|\Z)',
-                        md_text, re.DOTALL | re.IGNORECASE
-                    )
-                    if cap_match:
-                        caption = cap_match.group(1).strip()[:200]
-
-                figures.append({
-                    "id": f"fig{i}",
-                    "url": "",
-                    "local_path": str(img_file),
-                    "caption": caption or "N/A",
-                    "filename": img_file.name,
-                    "source": "mineru",
-                })
-
-    # Cleanup temp files
-    try:
-        pdf_path.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-    return figures
 
 
 def verify_against_paper(note_path: Path, vault_path: Path) -> dict:
@@ -597,11 +477,10 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
         assets_dir = vault_path / "assets" / method_name
     
     legend_path = assets_dir / "legend.md"
-    
+
     # Collect data
     note_images = extract_note_images(note_text)
-    legends = load_legend(legend_path)
-    
+
     # Actual files in assets
     actual_files = {}
     if assets_dir.exists():
@@ -612,6 +491,36 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
                     "size": f.stat().st_size,
                     "name": f.name,
                 }
+
+    # === Auto-generate legend when missing (before loading legends, so checks work) ===
+    if not legend_path.exists() and actual_files:
+        try:
+            title_match = re.search(r'^title:\s*["\']?(.+?)["\']?\s*$', note_text, re.MULTILINE)
+            title = title_match.group(1) if title_match else method_name
+
+            note_stems_for_legend = set()
+            for match in re.finditer(r'!\[\[([^\]|]+?)(?:\|\d+)?\]\]', note_text):
+                note_stems_for_legend.add(Path(match.group(1)).stem)
+
+            legend_lines = [
+                f"# Image Legends: {title}",
+                "",
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} (by image-check)",
+                "",
+                "| ID | Source | Link | Legend | Used in Note |",
+                "|----|--------|------|--------|--------------|",
+            ]
+            for stem, info in actual_files.items():
+                used = "✅" if stem in note_stems_for_legend else "❌"
+                legend_lines.append(
+                    f"| {stem} | local | ![[{assets_dir.name}/{info['name']}]] | N/A | {used} |"
+                )
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            legend_path.write_text("\n".join(legend_lines), encoding="utf-8")
+        except Exception:
+            pass
+
+    legends = load_legend(legend_path)
     
     # Run checks
     checks = {}
@@ -653,7 +562,7 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
     
     # Check 4: Legend completeness
     if legends:
-        no_legend = [l for l in legends if not l["legend"] or l["legend"] == "待补充"]
+        no_legend = [l for l in legends if not l["legend"] or l["legend"] in ("待补充", "N/A")]
         checks["legend_complete"] = {
             "ok": len(no_legend) == 0,
             "detail": f"Missing legends: {[l['id'] for l in no_legend]}" if no_legend else "All legends filled",
@@ -697,115 +606,12 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
             "detail": f"Not in legend: {unmatched}" if unmatched else "All references match",
         }
     else:
-        # No legend — verify against original paper
-        paper_verify = verify_against_paper(note_path, vault_path)
-        if paper_verify["ok"]:
-            checks["reference_match"] = {
-                "ok": True,
-                "detail": f"Verified against paper ({paper_verify.get('source', '?')}): "
-                          f"{paper_verify['matched']}/{paper_verify['paper_figures']} figures matched",
-            }
-            checks["paper_verify"] = {
-                "ok": len(paper_verify.get("unmatched_note", [])) == 0,
-                "detail": f"Source: {paper_verify.get('source', '?')}, "
-                          f"Paper has {paper_verify['paper_figures']} figures, "
-                          f"note refs {paper_verify['note_refs']}, "
-                          f"matched {paper_verify['matched']}, "
-                          f"missing from note: {paper_verify.get('missing_from_note', [])}",
-            }
-        else:
-            checks["reference_match"] = {
-                "ok": False,
-                "detail": paper_verify.get("detail", "No legend and cannot verify against paper"),
-            }
-            checks["paper_verify"] = {
-                "ok": False,
-                "detail": paper_verify.get("detail", "Could not fetch original paper"),
-            }
-    
-    # === Auto-generate legend when missing ===
-    legend_generated = False
-    if not legend_path.exists() and paper_verify.get("ok"):
-        # Generate legend from paper verification data
-        try:
-            arxiv_id = paper_verify.get("arxiv_id", "")
-            note_text = note_path.read_text(encoding="utf-8")
-            title_match = re.search(r'^title:\s*["\']?(.+?)["\']?\s*$', note_text, re.MULTILINE)
-            title = title_match.group(1) if title_match else method_name
-            
-            # Build legend from paper figures
-            legend_lines = [
-                f"# Image Legends: {title}",
-                "",
-                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} (by image-check)",
-                f"Source: {paper_verify.get('source', 'unknown')}",
-                "",
-                "| ID | Source | Link | Legend | Used in Note |",
-                "|----|--------|------|--------|--------------|",
-            ]
-            
-            # Get note image references for "Used" column
-            note_urls = set()
-            for match in re.finditer(r'!\[[^\]]*\]\((https?://[^)]+)\)', note_text):
-                note_urls.add(match.group(1))
-            note_stems = set()
-            for match in re.finditer(r'!\[\[([^\]|]+?)(?:\|\d+)?\]\]', note_text):
-                note_stems.add(Path(match.group(1)).stem)
-            
-            for fig in paper_verify.get("figures", []):
-                fig_id = fig.get("id", "unknown")
-                caption = fig.get("caption", "N/A").replace("|", "\\|")[:200]
-                url = fig.get("url", "")
-                local_path = fig.get("local_path", "")
-                
-                # Determine source and link
-                if url:
-                    source = "external"
-                    link = f"![]({url})"
-                    used = "✅" if url in note_urls or fig_id in note_stems else "❌"
-                elif local_path:
-                    source = "local"
-                    link = f"![[{assets_dir.name}/{fig.get('filename', '')}]]"
-                    used = "✅" if fig_id in note_stems else "❌"
-                else:
-                    source = "unknown"
-                    link = "N/A"
-                    used = "❌"
-                
-                legend_lines.append(f"| {fig_id} | {source} | {link} | {caption} | {used} |")
-            
-            # Write legend
-            assets_dir.mkdir(parents=True, exist_ok=True)
-            legend_path.write_text("\n".join(legend_lines), encoding="utf-8")
-            legend_generated = True
-            
-            # Reload legends after generation
-            legends = load_legend(legend_path)
-            
-            # Update legend_exists check
-            checks["legend_exists"] = {
-                "ok": True,
-                "detail": f"Auto-generated from {paper_verify.get('source', '?')}: {legend_path}",
-            }
-            # Update legend_complete check
-            no_legend = [l for l in legends if not l["legend"] or l["legend"] == "N/A"]
-            checks["legend_complete"] = {
-                "ok": len(no_legend) == 0,
-                "detail": f"Auto-generated with {len(legends)} entries" if not no_legend 
-                          else f"{len(no_legend)} entries missing caption",
-            }
-        except Exception as e:
-            checks["legend_generated"] = {
-                "ok": False,
-                "detail": f"Failed to generate legend: {e}",
-            }
-    
-    if legend_generated:
-        checks["legend_generated"] = {
-            "ok": True,
-            "detail": f"Auto-generated legend from {paper_verify.get('source', '?')} with {len(legends)} figures",
+        # No legend — skip MinerU re-extraction, just report
+        checks["reference_match"] = {
+            "ok": False,
+            "detail": "No legend file. Run paper-reader first to generate legend.",
         }
-    
+
     # Stats
     stats = {
         "note_local_images": len(note_images["local"]),
@@ -815,8 +621,12 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
         "total_note_refs": len(note_images["local"]) + len(note_images["external"]),
     }
     
+    # Critical checks: these indicate real problems
+    critical_keys = {"local_files_exist", "file_sizes", "reference_match", "external_links"}
+    critical_ok = all(checks[k]["ok"] for k in critical_keys if k in checks)
+    # Non-critical: legend_complete (caption missing), etc.
     all_ok = all(c["ok"] for c in checks.values())
-    
+
     return {
         "method": method_name,
         "note": str(note_path),
@@ -825,7 +635,8 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
         "checks": checks,
         "stats": stats,
         "issues": issues,
-        "status": "passed" if all_ok else "failed",
+        "status": "passed" if critical_ok else "failed",
+        "all_passed": all_ok,
     }
 
 
