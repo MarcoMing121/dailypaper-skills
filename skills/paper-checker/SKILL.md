@@ -57,14 +57,41 @@ title=$(grep 'title:' {笔记路径} | sed 's/title: *//' | tr -d '"')
 
 ### Step 2.2: 下载/提取原文
 
-**优先级**：MinerU PDF > arXiv HTML
+**优先级**：arXiv HTML > MinerU PDF > 项目主页
+
+> 与 paper-reader 保持一致。arXiv HTML 更快、可直接 grep 搜索，不需要上传和处理 PDF。
+
+#### Step 2.2.1: arXiv HTML（首选）
+
+```bash
+# 检查 arXiv HTML 是否可用
+HTML_URL="https://arxiv.org/html/${arxiv_id}"
+HTML_STATUS=$(curl -sI "$HTML_URL" | head -1)
+echo "arXiv HTML status: $HTML_STATUS"
+
+# 如果返回 200，直接下载 HTML 搜索
+if echo "$HTML_STATUS" | grep -q "200"; then
+  curl -sL "$HTML_URL" -o /tmp/paper_${arxiv_id}.html
+  LINES=$(wc -l < /tmp/paper_${arxiv_id}.html)
+  echo "HTML downloaded: $LINES lines"
+fi
+```
+
+**优点**：
+- 最快：不需要上传/处理
+- 可直接 grep/搜索
+- 同 paper-reader 流程，保持一致
+
+**如果 HTML 不可用**（返回 404 或其他错误），降级到 MinerU PDF 提取。
+
+#### Step 2.2.2: MinerU PDF（降级方案）
 
 ```bash
 # 下载 PDF
 curl -sL "https://arxiv.org/pdf/${arxiv_id}.pdf" -o /tmp/paper_${arxiv_id}.pdf
 ```
 
-#### PDF 大小检查与自动分割（CRITICAL - 防止 MinerU 超时）
+##### PDF 大小检查与自动分割（CRITICAL - 防止 MinerU 超时）
 
 > MinerU OSS 上传限制约 **1 MB**，超过会导致 `context deadline exceeded` 错误。
 
@@ -154,11 +181,16 @@ pdftotext /tmp/paper_${arxiv_id}.pdf /tmp/paper_${arxiv_id}.txt
 ### Step 3.2: 内容定位
 
 ```bash
-# 在 MinerU Markdown 中搜索
-grep -B5 -A10 -i "{关键词}" /tmp/paper_mineru_${arxiv_id}/paper_${arxiv_id}.md
-
-# 提取相关段落
-sed -n '/{section名}/,/^## /p' /tmp/paper_mineru_${arxiv_id}/paper_${arxiv_id}.md
+# 优先在 HTML 中搜索（最快）
+if [ -f /tmp/paper_${arxiv_id}.html ]; then
+  grep -B5 -A10 -i "{关键词}" /tmp/paper_${arxiv_id}.html
+  # 提取相关 section
+  sed -n '/<section/,/<\/section>/p' /tmp/paper_${arxiv_id}.html | grep -B5 -A10 -i "{关键词}"
+else
+  # 降级到 MinerU Markdown
+  grep -B5 -A10 -i "{关键词}" /tmp/paper_mineru_${arxiv_id}/paper_${arxiv_id}.md
+  sed -n '/{section名}/,/^## /p' /tmp/paper_mineru_${arxiv_id}/paper_${arxiv_id}.md
+fi
 ```
 
 ### Step 3.3: 公式查找
