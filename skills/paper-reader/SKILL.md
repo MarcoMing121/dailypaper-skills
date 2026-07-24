@@ -347,6 +347,7 @@ grep -E '<img.*src=' /tmp/paper_${ARXIV_ID}.html | \
 5. **MinerU 优先**: 使用 MinerU 自动提取图片、表格、公式，无需手动处理
 6. **第一性原理分析**: 当使用"深度分析"、"第一性原理"、"6点分析"模式时，必须在笔记中包含完整的6点框架分析
 7. **⚠️ Mermaid 架构图强制生成（CRITICAL）**: 笔记的「模型架构」部分**必须包含一个 Mermaid 流程图**。即使论文原文没有明确的架构图，也必须根据论文描述的流程/模块/数据流**自行构建** Mermaid 图。不允许跳过或省略。
+8. **📌 论文原图引用到模型架构 section**: 在 Mermaid 图**上方**放置论文的架构图（从 arXiv HTML 找 caption 含 overview/framework/architecture 的那张 Figure）。格式见下方模板。
 
 > 公式/图片/表格的详细质量规范见 `references/quality-standards.md`
 
@@ -359,9 +360,50 @@ grep -E '<img.*src=' /tmp/paper_${ARXIV_ID}.html | \
 - **无明确架构图的论文**: 根据方法描述自行构建数据流/模块关系图
 - **纯理论论文**: 画出概念之间的关系图或算法流程图
 
+### 📌 论文架构图引用（CRITICAL）
+
+**位置**: Mermaid 图与 section 标题之间，放在 `> 论文提供显式架构图 ✅ 标题` 块引用后面。
+
+**如何找到论文的架构图**：
+1. 在 arXiv HTML 中查找 caption 含 `overview` / `architecture` / `framework` / `pipeline` 关键词的 `<figure>` 标签
+2. 如果找不到明显的架构图，选**最接近方法整体流程**的那张 Figure（如 "Workflow of..."、"System overview"）
+3. 使用与笔记其他图片一致的命名格式（`fig{N}_{descriptive_name}.ext`）
+
+**引用格式**：
+
+```markdown
+### 模型架构 (Mermaid + 论文原图)
+
+> 论文提供显式架构图 ✅ SoFTA 慢-快双智能体框架
+
+![[SoFTA/fig2_framework.png]]
+
+**图注**: SoFTA 框架概览。上半身以 100Hz 运行实现精细 EE 稳定，下半身以 50Hz 运行实现鲁棒步态，共享观测但独立 Actor-Critic 网络。
+
+```mermaid
+graph TB
+    ...
+```
+
+**判断依据（从 arXiv HTML 确定哪张是架构图）**：
+
+| 关键词 | 匹配示例 | 优先级 |
+|--------|---------|--------|
+| `overview` + `framework` | "Overview of the XX framework" | 🥇 最高 |
+| `architecture` | "Network architecture", "Model architecture" | 🥇 |
+| `pipeline` | "Training pipeline", "Inference pipeline" | 🥈 |
+| `workflow` | "Workflow of the proposed method" | 🥈 |
+| `schematic` | "Schematic diagram of the system" | 🥈 |
+| 无匹配但描述整体流程的 | "The proposed method" paragraph | 🥉 |
+
+**自检**:
+- [ ] 从 arXiv HTML 找到了含 architecture/overview/framework 的 Figure？
+- [ ] 该 Figure 被引用在模型架构 section？
+- [ ] 图片格式与其他图片一致（`![[Method/figN_name.png]]`）？
+
 **Mermaid 图规范**:
 1. 使用 `graph TB`（自上而下）或 `graph LR`（左到右）布局
-2. 节点用简洁中文或英文，不超过 15 字
+2. 节点用简洁中文或英文，需要换行时用 `<br/>`
 3. **必须包含两个 subgraph**: `训练阶段` 和 `推理阶段`
 4. 训练阶段：展示每个模块如何训练（分开训练的模块用独立 subgraph）
 5. 推理阶段：展示完整推理流程（输入 → 模块 → 输出）
@@ -428,6 +470,7 @@ graph TB
 - [ ] 分开训练的模块在训练阶段有独立 subgraph？
 - [ ] 推理阶段展示了完整的输入 → 输出流程？
 - [ ] 节点数量合理（8-20 个）？
+- [ ] **论文原图已引用**在 Mermaid 图上方（见上方 📌 论文架构图引用）？
 
 ### ⚠️ 图片处理（MinerU 自动化）
 

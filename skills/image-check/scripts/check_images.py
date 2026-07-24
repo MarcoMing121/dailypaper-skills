@@ -449,6 +449,461 @@ def verify_against_paper(note_path: Path, vault_path: Path) -> dict:
     }
 
 
+# ── Figure type classification ──────────────────────────────────────────────
+
+# Keywords that indicate a figure is about architecture/framework/overview
+ARCH_KEYWORDS_ZH = {"架构", "框架", "概览", "系统", "流程", "结构", "组成", "设计", "概述", "示意图", "pipeline"}
+ARCH_KEYWORDS_EN = {"architecture", "overview", "framework", "pipeline", "system", "structure",
+                    "component", "schematic", "diagram", "layout", "design", "illustration"}
+
+# Keywords that indicate a figure is about results/experiments
+RESULT_KEYWORDS_ZH = {"结果", "实验", "对比", "消融", "性能", "效果", "分析", "评估", "训练", "奖励"}
+RESULT_KEYWORDS_EN = {"result", "experiment", "comparison", "ablation", "performance", "evaluation",
+                      "metric", "curve", "plot", "chart", "benchmark", "quantitative", "reward"}
+
+# Keywords that indicate qualitative examples
+EXAMPLE_KEYWORDS_ZH = {"示例", "可视化", "定性", "展示", "案例", "截图", "真实"}
+EXAMPLE_KEYWORDS_EN = {"example", "visualization", "qualitative", "demonstration", "real-world",
+                       "real world", "deployment", "simulation", "visual"}
+
+
+def classify_figure_type(text: str) -> str:
+    """Classify a caption/heading into figure type category."""
+    text_lower = text.lower()
+
+    # Score each category
+    arch_score = 0
+    result_score = 0
+    example_score = 0
+
+    for kw in ARCH_KEYWORDS_ZH:
+        if kw in text:
+            arch_score += 2
+    for kw in ARCH_KEYWORDS_EN:
+        if kw in text_lower:
+            arch_score += 2
+
+    for kw in RESULT_KEYWORDS_ZH:
+        if kw in text:
+            result_score += 2
+    for kw in RESULT_KEYWORDS_EN:
+        if kw in text_lower:
+            result_score += 2
+
+    for kw in EXAMPLE_KEYWORDS_ZH:
+        if kw in text:
+            example_score += 2
+    for kw in EXAMPLE_KEYWORDS_EN:
+        if kw in text_lower:
+            example_score += 2
+
+    # Boost architecture score for specific terms
+    if re.search(r'\b(fig|figure)\s*\d+', text_lower) and re.search(r'(arch|overview|framework)', text_lower):
+        arch_score += 3
+
+    # Boost result score for specific patterns
+    if re.search(r'(table|acc|mse|error|score|reward|loss)\b', text_lower):
+        result_score += 1
+    if re.search(r'(fig|figure)\s*\d+', text_lower) and re.search(r'(result|comparison|ablation)', text_lower):
+        result_score += 3
+
+    scores = {
+        "architecture": arch_score,
+        "result": result_score,
+        "example": example_score,
+    }
+
+    best = max(scores, key=scores.get)
+    # Return "unknown" if no clear signal
+    return best if scores[best] >= 2 else "unknown"
+
+
+def extract_note_section_headings(text: str, img_pos: int) -> list:
+    """Extract the closest section/subsection heading before an image."""
+    # Scan backwards from image position for headings
+    before = text[:img_pos]
+    headings = re.findall(r'^(#{1,4})\s+(.+)$', before, re.MULTILINE)
+    return [h[1].strip() for h in headings]
+
+
+def fetch_arxiv_html_captions(arxiv_id: str) -> dict[str, str]:
+    """Download arXiv HTML and extract figure id → caption mapping."""
+    import subprocess
+
+    url = f"https://arxiv.org/html/{arxiv_id}"
+    try:
+        result = subprocess.run(
+            ["curl", "-sL", url],
+            capture_output=True, text=True, timeout=30
+        )
+        html = result.stdout
+    except Exception:
+        return {}
+
+    if not html or len(html) < 1000:
+        return {}
+
+    captions = {}
+
+    # Extract <figure> blocks with their <img> and <figcaption>
+    fig_pattern = re.compile(r'<figure[^>]*>(.*?)</figure>', re.DOTALL)
+    img_pattern = re.compile(r'<img[^>]*src=["\']([^"\']+)["\']', re.DOTALL)
+    caption_pattern = re.compile(r'<figcaption[^>]*>(.*?)</figcaption>', re.DOTALL)
+
+    for fig_match in fig_pattern.finditer(html):
+        fig_html = fig_match.group(1)
+        img_match = img_pattern.search(fig_html)
+        if not img_match:
+            continue
+        img_url = img_match.group(1)
+        img_id = Path(img_url).stem  # e.g., "x1", "x2"
+
+        cap_match = caption_pattern.search(fig_html)
+        caption = ""
+        if cap_match:
+            caption = re.sub(r'<[^>]+>', '', cap_match.group(1)).strip()
+
+        if img_id:
+            captions[img_id] = caption
+
+    return captions
+
+
+def check_figure_type_consistency(note_path: Path, vault_path: Path) -> dict:
+    """
+    Verify that images the note calls 'architecture' actually correspond
+    to architecture/overview figures from the paper, not results/examples/etc.
+    """
+    note_text = note_path.read_text(encoding="utf-8")
+
+    # Find arXiv ID
+    arxiv_id = ""
+    match = re.search(r'arxiv.*?(\d{4}\.\d{4,5})', note_text)
+    if match:
+        arxiv_id = match.group(1)
+    if not arxiv_id:
+        match = re.search(r'arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})', note_text)
+        if match:
+            arxiv_id = match.group(1)
+
+    if not arxiv_id:
+        return {"ok": True, "detail": "No arXiv ID — skipping figure type check", "mismatches": []}
+
+    # Get paper captions
+    paper_captions = fetch_arxiv_html_captions(arxiv_id)
+    if not paper_captions:
+        return {"ok": True, "detail": "Could not fetch arXiv HTML captions", "mismatches": []}
+
+    mismatches = []
+    checked = 0
+
+    # Check all image references with surrounding context
+    for match in re.finditer(r'!\[\[([^\]|]+?)(?:\|\d+)?\]\]', note_text):
+        ref = match.group(1)
+        stem = Path(ref).stem
+        pos = match.start()
+
+        # Find the nearest section heading(s) before this image
+        headings = extract_note_section_headings(note_text, pos)
+        if not headings:
+            continue
+
+        # Get the closest meaningful heading (skip the title)
+        note_heading = headings[-1] if headings else ""
+
+        # Classify note's description
+        note_type = classify_figure_type(note_heading)
+
+        # Skip if note doesn't claim a specific type
+        if note_type == "unknown":
+            continue
+
+        # Map filename stem to paper figure ID
+        # Try direct match, or match via number extracted from name
+        fig_id_match = re.search(r'fig(\d+)', stem)
+        paper_fig_id = f"x{fig_id_match.group(1)}" if fig_id_match else stem
+
+        # Get paper caption
+        paper_caption = ""
+        for pid, cap in paper_captions.items():
+            if pid == paper_fig_id or pid == stem:
+                paper_caption = cap
+                paper_fig_id = pid
+                break
+            # Precise caption-based matching (avoids "Figure 1" matching "Figure 10")
+            if fig_id_match and re.search(rf'\bFigure\s+{fig_id_match.group(1)}\b', cap):
+                paper_caption = cap
+                paper_fig_id = pid
+                break
+
+        if not paper_caption:
+            # Try matching by image filename
+            for pid, cap in paper_captions.items():
+                if stem in cap.lower() or stem.replace("_", " ") in cap.lower():
+                    paper_caption = cap
+                    paper_fig_id = pid
+                    break
+
+        if not paper_caption:
+            continue
+
+        # Classify paper's own description
+        paper_type = classify_figure_type(paper_caption)
+
+        checked += 1
+
+        # Mismatch: note says architecture but paper says results/examples, or vice versa
+        if note_type != paper_type and paper_type != "unknown":
+            mismatches.append({
+                "image": stem,
+                "ref": f"![[{ref}]]",
+                "section_heading": note_heading,
+                "note_claim_type": note_type,
+                "paper_caption": paper_caption[:150],
+                "paper_actual_type": paper_type,
+                "severity": "high" if (note_type == "architecture" and paper_type != "architecture") else "medium",
+            })
+
+    # Also check external image URLs
+    for match in re.finditer(r'!\[([^\]]*)\]\((https?://[^)]+)\)', note_text):
+        alt = match.group(1)
+        url = match.group(2)
+        pos = match.start()
+
+        headings = extract_note_section_headings(note_text, pos)
+        if not headings:
+            continue
+        note_heading = headings[-1] if headings else ""
+        note_type = classify_figure_type(note_heading)
+        if note_type == "unknown":
+            continue
+
+        # Match URL stem to paper figures
+        url_stem = Path(url).stem
+        paper_caption = paper_captions.get(url_stem, "")
+        if not paper_caption:
+            for pid, cap in paper_captions.items():
+                if pid == url_stem or url_stem in cap.lower():
+                    paper_caption = cap
+                    break
+
+        if not paper_caption:
+            continue
+
+        paper_type = classify_figure_type(paper_caption)
+        checked += 1
+
+        if note_type != paper_type and paper_type != "unknown":
+            mismatches.append({
+                "image": alt or url_stem,
+                "ref": f"![{alt}]({url[:80]}...)",
+                "section_heading": note_heading,
+                "note_claim_type": note_type,
+                "paper_caption": paper_caption[:150],
+                "paper_actual_type": paper_type,
+                "severity": "high" if (note_type == "architecture" and paper_type != "architecture") else "medium",
+            })
+
+    # Determine overall status
+    if not mismatches:
+        return {
+            "ok": True,
+            "detail": f"All {checked} figures type-consistent (note heading ↔ paper caption)",
+            "checked": checked,
+            "mismatches": [],
+        }
+    else:
+        high_sev = sum(1 for m in mismatches if m["severity"] == "high")
+        return {
+            "ok": False,
+            "detail": f"{len(mismatches)} type mismatches ({high_sev} high severity)",
+            "checked": checked,
+            "mismatches": mismatches,
+        }
+
+
+def check_model_architecture_section(note_path: Path, vault_path: Path) -> dict:
+    """
+    Special check for the 方法详解 → 模型架构 section.
+
+    Verifies:
+    1. The section contains a Mermaid diagram (template requirement)
+    2. The paper's actual architecture figure (identified from arXiv HTML caption)
+       is referenced in or near this section
+    3. The architecture figure's note caption correctly identifies it as architecture
+    """
+    note_text = note_path.read_text(encoding="utf-8")
+    method_name = note_path.stem
+
+    # ── 1. Find "模型架构" section boundaries ─────────────────────────────
+    arch_sec_start = None
+    arch_sec_end = None
+
+    # Look for "### 模型架构" heading (allow trailing content in parens like "(Mermaid)")
+    sec_pattern = re.compile(r'^###\s+模型架构.*$', re.MULTILINE)
+    sec_match = sec_pattern.search(note_text)
+    if not sec_match:
+        # Try English heading
+        sec_pattern = re.compile(r'^###\s+Model Architecture.*$', re.MULTILINE)
+        sec_match = sec_pattern.search(note_text)
+    if not sec_match:
+        # Try "架构" (broader match)
+        sec_pattern = re.compile(r'^###\s+.*架构.*$', re.MULTILINE)
+        sec_match = sec_pattern.search(note_text)
+
+    if sec_match:
+        arch_sec_start = sec_match.start()
+        # Find next section at same or higher heading level
+        next_sec = re.search(r'^#{1,3}\s+', note_text[arch_sec_start + len(sec_match.group(0)):], re.MULTILINE)
+        if next_sec:
+            arch_sec_end = arch_sec_start + len(sec_match.group(0)) + next_sec.start()
+        else:
+            arch_sec_end = len(note_text)
+
+    section_found = arch_sec_start is not None
+    section_text = note_text[arch_sec_start:arch_sec_end] if arch_sec_start is not None else ""
+
+    # ── 2. Check for Mermaid diagram ──────────────────────────────────────
+    has_mermaid = bool(re.search(r'```mermaid', section_text)) if section_text else False
+
+    # ── 3. Find figure references in/near the section ─────────────────────
+    # Check the section itself + the 1000 chars after (in case figure is just below)
+    search_zone = section_text
+    if arch_sec_end:
+        search_zone += note_text[arch_sec_end:arch_sec_end + 1000]
+
+    figure_refs = []  # (type, ref_string, stem_or_url)
+    # Local wikilinks
+    for m in re.finditer(r'!\[\[([^\]|]+?)(?:\|\d+)?\]\]', search_zone):
+        figure_refs.append(("local", m.group(0), Path(m.group(1)).stem))
+    # External URLs
+    for m in re.finditer(r'!\[([^\]]*)\]\((https?://[^)]+)\)', search_zone):
+        figure_refs.append(("external", m.group(0), m.group(2)))
+
+    # ── 4. Get arXiv HTML captions to identify architecture figure ────────
+    arxiv_id = ""
+    match = re.search(r'arxiv.*?(\d{4}\.\d{4,5})', note_text)
+    if match:
+        arxiv_id = match.group(1)
+    if not arxiv_id:
+        match = re.search(r'arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})', note_text)
+        if match:
+            arxiv_id = match.group(1)
+
+    paper_captions = {}
+    if arxiv_id:
+        paper_captions = fetch_arxiv_html_captions(arxiv_id)
+
+    # Identify which paper figure is the "architecture" figure
+    arch_fig_id = None
+    arch_fig_caption = ""
+    for fig_id, cap in paper_captions.items():
+        fig_type = classify_figure_type(cap)
+        if fig_type == "architecture":
+            arch_fig_id = fig_id
+            arch_fig_caption = cap[:200]
+            break  # Take the first architecture figure found
+
+    # ── 5. Cross-reference: is the arch figure in the section? ────────────
+    arch_figure_in_section = False
+    matched_ref = ""
+    for ref_type, ref_str, key in figure_refs:
+        if ref_type == "local":
+            # Check if the local filename maps to the architecture figure
+            stem = key
+            # Extract number from name like fig2_xxx → x2
+            num_match = re.search(r'(\d+[a-z]?)', stem)
+            if num_match:
+                expected_id = f"x{num_match.group(1)}"
+                if expected_id == arch_fig_id:
+                    arch_figure_in_section = True
+                    matched_ref = ref_str
+                    break
+            # Also check stem directly
+            if arch_fig_id and arch_fig_id in stem:
+                arch_figure_in_section = True
+                matched_ref = ref_str
+                break
+        elif ref_type == "external":
+            url_stem = Path(key).stem
+            if url_stem == arch_fig_id:
+                arch_figure_in_section = True
+                matched_ref = ref_str
+                break
+            # Check URL stem in caption
+            if arch_fig_id and arch_fig_id == url_stem:
+                arch_figure_in_section = True
+                matched_ref = ref_str
+                break
+
+    # ── 6. Classify note caption for the section heading ──────────────────
+    heading_text = ""
+    if sec_match:
+        heading_text = sec_match.group(0)
+
+    note_type = classify_figure_type(heading_text + " " + " ".join(
+        [r[1] for r in figure_refs if r[0] == "local"]
+    ))
+
+    # ── 7. Determine result ──────────────────────────────────────────────
+    issues_detail = []
+
+    if not section_found:
+        return {
+            "ok": False,
+            "detail": "❌ '模型架构' section not found in note",
+            "has_mermaid": False,
+            "arch_figure_present": False,
+            "arch_figure_in_section": False,
+            "paper_arch_figure": arch_fig_id or "unknown",
+            "paper_arch_caption": arch_fig_caption,
+            "figure_refs_in_section": len(figure_refs),
+        }
+
+    if not has_mermaid:
+        issues_detail.append("No Mermaid diagram in 模型架构 section")
+
+    arch_figure_status = "✅" if arch_figure_in_section else "⚠️"
+    if not arch_figure_in_section and arch_fig_id:
+        issues_detail.append(
+            f"Paper's architecture figure ({arch_fig_id}: '{arch_fig_caption[:60]}...') "
+            f"is NOT referenced in the 模型架构 section"
+        )
+    elif not arch_figure_in_section and not arch_fig_id:
+        pass  # No architecture figure in paper, fine
+
+    ok = has_mermaid or len(issues_detail) == 0
+    # If no architecture figure in paper, that's fine too
+
+    detail_parts = []
+    if has_mermaid:
+        detail_parts.append("Mermaid ✅")
+    else:
+        detail_parts.append("Mermaid ❌")
+    if arch_figure_in_section:
+        detail_parts.append(f"Paper arch figure {arch_fig_id} ✅")
+    elif arch_fig_id:
+        detail_parts.append(f"Paper arch figure {arch_fig_id} ⚠️ not in section")
+    else:
+        detail_parts.append("No arch figure in paper to verify")
+    if figure_refs:
+        detail_parts.append(f"({len(figure_refs)} figure refs in section)")
+
+    return {
+        "ok": ok,
+        "section_found": section_found,
+        "has_mermaid": has_mermaid,
+        "arch_figure_present": arch_figure_in_section or not arch_fig_id,
+        "arch_figure_in_section": arch_figure_in_section,
+        "paper_arch_figure": arch_fig_id or "unknown",
+        "paper_arch_caption": arch_fig_caption,
+        "figure_refs_in_section": len(figure_refs),
+        "note_claim_type": note_type,
+        "detail": ", ".join(detail_parts),
+        "issues": issues_detail,
+    }
+
+
 def check_images(note_path: Path, vault_path: Path) -> dict:
     """Run all image checks."""
     method_name = note_path.stem
@@ -621,8 +1076,25 @@ def check_images(note_path: Path, vault_path: Path) -> dict:
         "total_note_refs": len(note_images["local"]) + len(note_images["external"]),
     }
     
+    # Check 7: Figure type consistency (architecture vs results, etc.)
+    type_check = check_figure_type_consistency(note_path, vault_path)
+    checks["figure_type_match"] = type_check
+    if not type_check["ok"]:
+        issues.append(f"Figure type mismatches: {type_check['detail']}")
+        mismatches = type_check.get("mismatches", [])
+        for m in mismatches[:5]:
+            issues.append(f"  [{m['severity']}] {m['image']}: note says '{m['note_claim_type']}' but paper figure caption '{m['paper_caption'][:60]}...' says '{m['paper_actual_type']}'")
+
+    # Check 8: 方法详解 → 模型架构 section integrity
+    arch_check = check_model_architecture_section(note_path, vault_path)
+    checks["model_arch_section"] = arch_check
+    if not arch_check["ok"]:
+        issues.append(f"模型架构 section: {arch_check['detail']}")
+        for iss in arch_check.get("issues", []):
+            issues.append(f"  ⚠️ {iss}")
+
     # Critical checks: these indicate real problems
-    critical_keys = {"local_files_exist", "file_sizes", "reference_match", "external_links"}
+    critical_keys = {"local_files_exist", "file_sizes", "reference_match", "external_links", "figure_type_match", "model_arch_section"}
     critical_ok = all(checks[k]["ok"] for k in critical_keys if k in checks)
     # Non-critical: legend_complete (caption missing), etc.
     all_ok = all(c["ok"] for c in checks.values())
@@ -678,8 +1150,43 @@ def write_check_result(vault_path: Path, result: dict):
         "",
     ])
     
+    # Add figure type mismatch details
+    type_check = result["checks"].get("figure_type_match", {})
+    if type_check and type_check.get("mismatches"):
+        lines.extend([
+            "",
+            "## 🔍 图片类型一致性检查",
+            "",
+            "| 图片 | Section | 笔记声称类型 | 论文实际类型 | 论文Caption | 严重程度 |",
+            "|------|---------|-------------|-------------|-------------|---------|",
+        ])
+        for m in type_check["mismatches"]:
+            severity_icon = "🔴" if m["severity"] == "high" else "🟡"
+            lines.append(
+                f"| {m['image']} | {m['section_heading'][:30]} | {m['note_claim_type']} "
+                f"| {m['paper_actual_type']} | {m['paper_caption'][:60]} | {severity_icon} {m['severity']} |"
+            )
+
+    # Add model architecture section details
+    arch_check = result["checks"].get("model_arch_section", {})
+    if arch_check:
+        lines.extend([
+            "",
+            "## 🏗️ 模型架构 Section 检查",
+            "",
+            f"| 检查项 | 结果 |",
+            f"|--------|------|",
+            f"| Section 存在 | {'✅' if arch_check.get('section_found') else '❌'} |",
+            f"| Mermaid 图 | {'✅' if arch_check.get('has_mermaid') else '⚠️'} |",
+            f"| 论文架构图引用 | {'✅' if arch_check.get('arch_figure_in_section') else '🟡 不在该section中'} |",
+            f"| 论文架构图ID | {arch_check.get('paper_arch_figure', 'N/A')} |",
+            f"| 论文架构图Caption | {arch_check.get('paper_arch_caption', 'N/A')[:80]} |",
+            f"| Section内图片引用数 | {arch_check.get('figure_refs_in_section', 0)} |",
+        ])
+
     if result["issues"]:
         lines.extend([
+            "",
             "## ⚠️ 需要修复",
             "",
         ])

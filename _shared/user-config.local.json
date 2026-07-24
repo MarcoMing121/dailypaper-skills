@@ -1,0 +1,9 @@
+{
+  "paths": {
+    "obsidian_vault": "/root/.openclaw/shared/ObsidianVault"
+  },
+  "git": {
+    "commit_enabled": true,
+    "push_enabled": true
+  }
+}
